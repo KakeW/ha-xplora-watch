@@ -9,6 +9,7 @@ as a bounded slice on the sensor plus per-day via `async_fetch_history_day` (the
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 from datetime import datetime, timedelta
 from typing import Any
@@ -124,6 +125,46 @@ async def test_today_is_always_fetched_fresh(coordinator: XploraDataUpdateCoordi
     assert mock.call_count == 2
 
 
+async def test_concurrent_today_reads_share_one_request(coordinator: XploraDataUpdateCoordinator) -> None:
+    """The card's forced refresh and websocket read coalesce by watch/day."""
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def delayed_history(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        started.set()
+        await release.wait()
+        return make_loc_history_payload()
+
+    mock = AsyncMock(side_effect=delayed_history)
+    coordinator.controller.getWatchLocHistory = mock  # type: ignore[method-assign]
+    today = _today(coordinator)
+    first = asyncio.create_task(coordinator.async_fetch_history_day(DEFAULT_WUID, today))
+    await started.wait()
+    second = asyncio.create_task(coordinator.async_fetch_history_day(DEFAULT_WUID, today, force=True))
+    await asyncio.sleep(0)
+    assert mock.await_count == 1
+
+    release.set()
+    first_result, second_result = await asyncio.gather(first, second)
+    assert first_result == second_result
+    assert mock.await_count == 1
+    assert coordinator._inflight_history == {}
+
+
+async def test_x6se_empty_today_retries_with_explicit_date(coordinator: XploraDataUpdateCoordinator) -> None:
+    """X6SE keeps date=None first and retries once with a concrete day only when empty."""
+    coordinator.controller.getDevice = lambda _wuid: {"getWatches": {"model": "X6SE"}}  # type: ignore[method-assign]
+    mock = AsyncMock(side_effect=[{"locHistory": {"list": []}}, make_loc_history_payload()])
+    coordinator.controller.getWatchLocHistory = mock  # type: ignore[method-assign]
+
+    points = await coordinator.async_fetch_history_day(DEFAULT_WUID, _today(coordinator))
+
+    assert len(points) == 2
+    assert mock.await_count == 2
+    assert mock.await_args_list[0].kwargs["date"] is None
+    assert mock.await_args_list[1].kwargs["date"] is not None
+
+
 async def test_past_day_is_cached_after_first_fetch(coordinator: XploraDataUpdateCoordinator) -> None:
     """A past day hits the network once, then is served from the Store (no second request)."""
     mock = _patch_loc_history(coordinator)
@@ -193,6 +234,21 @@ async def test_store_day_prunes_buckets_beyond_retention(coordinator: XploraData
     kept = coordinator._loc_history[DEFAULT_WUID]
     assert old not in kept
     assert recent in kept
+
+
+async def test_store_day_preserves_points_on_empty_or_partial_response(coordinator: XploraDataUpdateCoordinator) -> None:
+    """A transient response cannot shrink a day already accumulated in local storage."""
+    tzinfo = coordinator._history_tzinfo()
+    today = _today(coordinator)
+    first = {"tm": 1700000000000, "lat": 1.0, "lng": 2.0}
+    second = {"tm": 1700000001000, "lat": 1.1, "lng": 2.1}
+    await coordinator._store_day(DEFAULT_WUID, today, [first, second], tzinfo)
+
+    empty_result = await coordinator._store_day(DEFAULT_WUID, today, [], tzinfo)
+    partial_result = await coordinator._store_day(DEFAULT_WUID, today, [second], tzinfo)
+
+    assert empty_result == [first, second]
+    assert partial_result == [first, second]
 
 
 def test_bounded_history_caps_window_and_count(coordinator: XploraDataUpdateCoordinator) -> None:

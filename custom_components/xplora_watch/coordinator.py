@@ -192,6 +192,14 @@ class XploraDataUpdateCoordinator(DataUpdateCoordinator):
         # launching their own. This is the authoritative dedup; the cards' render-time guard is now
         # just a UX nicety on top of it. Keyed entries are removed as soon as the fetch settles.
         self._inflight_updates: dict[tuple[tuple[str, ...] | None, bool], asyncio.Task[dict[str, Any]]] = {}
+        # The fetch pipeline below still uses coordinator instance fields (`self.device`, battery,
+        # location, etc.) as scratch state while it awaits network calls. Different request
+        # signatures are intentionally not coalesced, but they must not execute that stateful
+        # pipeline at the same time or one watch can finish with another watch's values.
+        self._update_lock = asyncio.Lock()
+        # A history view starts both a forced sensor refresh and a websocket day read. Coalesce
+        # those calls by watch/day so they share one LocHistory request and one store write.
+        self._inflight_history: dict[tuple[str, str], asyncio.Task[list[dict[str, Any]]]] = {}
         # Centralized, single-flight token recovery (see `_with_recovery` / `_recover_token`). Every
         # controller call routes through `_with_recovery`, so an expired token is recovered at ONE
         # choke-point. `_token_recovery` is the in-flight recovery task: concurrent callers that hit
@@ -645,7 +653,7 @@ class XploraDataUpdateCoordinator(DataUpdateCoordinator):
             self._log.debug("Coalescing update onto in-flight request (targets=%s, force_functions=%s)", key[0], force_functions)
             return await existing
 
-        task = self.hass.async_create_task(self._fetch_and_store_xplora_data(targets, force_functions))
+        task = self.hass.async_create_task(self._run_serialized_update(targets, force_functions))
         # Retrieve the task's result/exception when it settles so a caller cancelled mid-await (e.g.
         # the coordinator's update timeout firing) doesn't leave an "exception never retrieved".
         task.add_done_callback(lambda t: t.cancelled() or t.exception())
@@ -653,7 +661,17 @@ class XploraDataUpdateCoordinator(DataUpdateCoordinator):
         try:
             return await task
         finally:
-            self._inflight_updates.pop(key, None)
+            if self._inflight_updates.get(key) is task:
+                self._inflight_updates.pop(key, None)
+
+    async def _run_serialized_update(self, targets: list[str] | None, force_functions: bool) -> dict[str, Any]:
+        """Run one stateful coordinator update at a time.
+
+        Requests with different signatures remain separate (and therefore keep their own result),
+        but wait at this lock before touching the coordinator's shared per-watch scratch fields.
+        """
+        async with self._update_lock:
+            return await self._fetch_and_store_xplora_data(targets, force_functions)
 
     async def _with_recovery(self, coro_factory: Callable[[], Awaitable[_T]]) -> _T:
         """Run a controller call through the bounded, single-flight token-recovery ladder.
@@ -1330,6 +1348,22 @@ class XploraDataUpdateCoordinator(DataUpdateCoordinator):
         re-requested. Returns the day's points (ascending by `tm`); on a benign fetch error returns
         whatever is already cached for that day. Auth/rate-limit/connection errors propagate.
         """
+        key = (wuid, day_key)
+        existing = self._inflight_history.get(key)
+        if existing is not None and not existing.done():
+            return await existing
+
+        task = self.hass.async_create_task(self._fetch_history_day_once(wuid, day_key, force=force))
+        task.add_done_callback(lambda t: t.cancelled() or t.exception())
+        self._inflight_history[key] = task
+        try:
+            return await task
+        finally:
+            if self._inflight_history.get(key) is task:
+                self._inflight_history.pop(key, None)
+
+    async def _fetch_history_day_once(self, wuid: str, day_key: str, *, force: bool) -> list[dict[str, Any]]:
+        """Perform the cache/network/store work for one coalesced history request."""
         tzinfo = self._history_tzinfo()
         today = self._today_key(tzinfo)
         cached = self._loc_history.get(wuid, {})
@@ -1349,12 +1383,43 @@ class XploraDataUpdateCoordinator(DataUpdateCoordinator):
         except Error as err:
             self._log.debug("location-history fetch failed for ...%s day %s (ignored): %s", wuid[25:], day_key, err)
             return list(cached.get(day_key, []))
+
+        # The captured X6SE log returned an empty list for today's date=None request even though the
+        # official app showed a track. Explicit-date compatibility is a deliberately narrow retry:
+        # keep the established query first, then try the alternate API parameter only for this
+        # model and symptom. Other models and non-empty responses incur no extra request.
+        raw_list = (raw or {}).get("locHistory", {}).get("list", []) or []
+        model = ((self.controller.getDevice(wuid) or {}).get("getWatches") or {}).get("model")
+        if day_key == today and date_param is None and model == "X6SE" and not raw_list:
+            explicit_date = self._day_key_to_date_param(day_key, tzinfo)
+            if explicit_date is not None:
+                try:
+                    retry_raw = await self._with_recovery(
+                        lambda: self.controller.getWatchLocHistory(
+                            wuid, date=explicit_date, tz=self._history_tz(), limit=LOC_HISTORY_FETCH_LIMIT
+                        )
+                    )
+                except RateLimitError, XploraConnectionError, AuthError:
+                    raise
+                except Error as err:
+                    self._log.debug("LocHistory X6SE fallback failed for ...%s day %s (ignored): %s", wuid[25:], day_key, err)
+                else:
+                    retry_list = (retry_raw or {}).get("locHistory", {}).get("list", []) or []
+                    self._log.debug(
+                        "LocHistory X6SE fallback ...%s day %s (date=%s) -> %d raw",
+                        wuid[25:],
+                        day_key,
+                        explicit_date,
+                        len(retry_list),
+                    )
+                    if retry_list:
+                        raw = retry_raw
+                        raw_list = retry_list
         points = sorted(self._parse_loc_history(raw), key=lambda p: p[ATTR_HISTORY_TM])
         # Debug breadcrumb: the line to read when verifying the `date`/`tm` semantics -- it shows the
         # request params and the FIRST raw `tm` (so seconds-vs-ms is obvious). Coordinates are
         # deliberately NOT logged (location is sensitive); only counts/timestamps.
         if self._log.isEnabledFor(logging.DEBUG):
-            raw_list = (raw or {}).get("locHistory", {}).get("list", []) or []
             sample_raw_tm = raw_list[0].get("tm") if raw_list and isinstance(raw_list[0], dict) else None
             self._log.debug(
                 "LocHistory ...%s day %s (date=%s, tz=%s) -> %d raw / %d parsed; first tm raw=%s",
@@ -1366,14 +1431,26 @@ class XploraDataUpdateCoordinator(DataUpdateCoordinator):
                 len(points),
                 sample_raw_tm,
             )
-        await self._store_day(wuid, day_key, points, tzinfo)
-        return points
+        return await self._store_day(wuid, day_key, points, tzinfo)
 
-    async def _store_day(self, wuid: str, day_key: str, points: list[dict[str, Any]], tzinfo: ZoneInfo | None) -> None:
-        """Replace `day_key`'s bucket with `points`, prune buckets past retention, persist on change."""
+    async def _store_day(self, wuid: str, day_key: str, points: list[dict[str, Any]], tzinfo: ZoneInfo | None) -> list[dict[str, Any]]:
+        """Merge `points` into a day bucket, prune past retention, and persist on change.
+
+        Location tracks grow during the day. A transient empty or partial backend response must
+        never erase points already archived locally; a newer point with the same timestamp wins.
+        """
         days = self._loc_history.setdefault(wuid, {})
-        changed = days.get(day_key) != points
-        days[day_key] = points
+        prior = days.get(day_key)
+        if prior is None:
+            merged = list(points)
+        elif not points:
+            merged = list(prior)
+        else:
+            by_timestamp = {point[ATTR_HISTORY_TM]: point for point in prior}
+            by_timestamp.update({point[ATTR_HISTORY_TM]: point for point in points})
+            merged = sorted(by_timestamp.values(), key=lambda point: point[ATTR_HISTORY_TM])
+        changed = prior != merged
+        days[day_key] = merged
         # Drop buckets older than retention (lexicographic compare works on YYYY-MM-DD).
         cutoff = (datetime.now(tzinfo) - timedelta(days=self._resolved.history_retention_days)).strftime("%Y-%m-%d")
         for stale_key in [k for k in days if k < cutoff]:
@@ -1381,6 +1458,9 @@ class XploraDataUpdateCoordinator(DataUpdateCoordinator):
             changed = True
         if changed:
             await self._persist_loc_history()
+        # A directly requested day can already be outside retention. Return the fetched/merged
+        # result to that caller even though the bucket was intentionally pruned from storage.
+        return list(days.get(day_key, merged))
 
     def _all_points(self, wuid: str) -> list[dict[str, Any]]:
         """All retained points for `wuid` across its day buckets, ascending by `tm`."""

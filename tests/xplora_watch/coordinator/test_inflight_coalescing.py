@@ -3,8 +3,9 @@
 Concurrent `async_update_xplora_data` calls that share a request signature (`targets` +
 `force_functions`) must run a SINGLE network fan-out and hand its result to every caller -- so two
 cards rendering at once, or a button press racing a service call / scheduled poll for the same
-watch(es), don't each hit the API. Calls with different signatures stay independent, and the
-local-only `new_data` injection path is never coalesced.
+watch(es), don't each hit the API. Calls with different signatures keep separate results but are
+serialized because the legacy fetch pipeline uses shared coordinator scratch state. The local-only
+`new_data` injection path is never coalesced.
 """
 
 from __future__ import annotations
@@ -14,15 +15,6 @@ from typing import Any
 
 from custom_components.xplora_watch.coordinator import XploraDataUpdateCoordinator
 from tests.xplora_watch.fixtures.graphql_payloads import DEFAULT_WUID
-
-
-async def _wait_until(predicate, *, iterations: int = 1000) -> None:
-    """Yield to the loop until ``predicate()`` is true (bounded, so a bug fails fast)."""
-    for _ in range(iterations):
-        if predicate():
-            return
-        await asyncio.sleep(0.001)
-    raise AssertionError("condition not met in time")  # pragma: no cover - only if coalescing breaks
 
 
 async def test_concurrent_same_signature_runs_one_fetch(
@@ -59,56 +51,76 @@ async def test_concurrent_same_signature_runs_one_fetch(
     assert coord._inflight_updates == {}
 
 
-async def test_different_force_functions_not_coalesced(
+async def test_different_force_functions_are_separate_but_serialized(
     coordinator_with_data: XploraDataUpdateCoordinator,
 ) -> None:
-    """A `force_functions` refresh is a distinct signature -- it never merges with a plain one."""
+    """A forced refresh stays separate but cannot race the plain update's scratch state."""
     coord = coordinator_with_data
     seen: list[bool] = []
-    release = asyncio.Event()
+    plain_started = asyncio.Event()
+    release_plain = asyncio.Event()
+    forced_started = asyncio.Event()
 
     async def fake_fetch(targets: list[str] | None, force_functions: bool) -> dict[str, Any]:
         seen.append(force_functions)
-        await release.wait()
+        if force_functions:
+            forced_started.set()
+        else:
+            plain_started.set()
+            await release_plain.wait()
         return {"force_functions": force_functions}
 
     coord._fetch_and_store_xplora_data = fake_fetch  # type: ignore[method-assign]
 
     plain = asyncio.create_task(coord.async_update_xplora_data([DEFAULT_WUID], force_functions=False))
+    await plain_started.wait()
     forced = asyncio.create_task(coord.async_update_xplora_data([DEFAULT_WUID], force_functions=True))
-    await _wait_until(lambda: len(seen) == 2)  # both fetches genuinely started
+    await asyncio.sleep(0)
+    assert seen == [False]
+    assert not forced_started.is_set()
 
-    release.set()
+    release_plain.set()
+    await forced_started.wait()
     await asyncio.gather(plain, forced)
 
-    assert sorted(seen) == [False, True]  # two independent fetches ran
+    assert seen == [False, True]
     assert coord._inflight_updates == {}
 
 
-async def test_different_targets_not_coalesced(
+async def test_different_targets_are_separate_but_serialized(
     coordinator_with_data: XploraDataUpdateCoordinator,
 ) -> None:
-    """Calls for different watch sets are independent requests (not coalesced)."""
+    """Different watch targets keep separate fetches without overlapping shared state."""
     coord = coordinator_with_data
     seen: list[tuple[str, ...] | None] = []
-    release = asyncio.Event()
+    first_started = asyncio.Event()
+    release_first = asyncio.Event()
+    second_started = asyncio.Event()
 
     async def fake_fetch(targets: list[str] | None, force_functions: bool) -> dict[str, Any]:
-        seen.append(tuple(targets) if targets else None)
-        await release.wait()
+        target = tuple(targets) if targets else None
+        seen.append(target)
+        if target == (DEFAULT_WUID,):
+            first_started.set()
+            await release_first.wait()
+        else:
+            second_started.set()
         return {}
 
     coord._fetch_and_store_xplora_data = fake_fetch  # type: ignore[method-assign]
 
     a = asyncio.create_task(coord.async_update_xplora_data([DEFAULT_WUID]))
+    await first_started.wait()
     b = asyncio.create_task(coord.async_update_xplora_data(["other-watch-id"]))
-    await _wait_until(lambda: len(seen) == 2)
+    await asyncio.sleep(0)
+    assert seen == [(DEFAULT_WUID,)]
+    assert not second_started.is_set()
 
-    release.set()
+    release_first.set()
+    await second_started.wait()
     await asyncio.gather(a, b)
 
-    assert (DEFAULT_WUID,) in seen
-    assert ("other-watch-id",) in seen
+    assert seen == [(DEFAULT_WUID,), ("other-watch-id",)]
     assert coord._inflight_updates == {}
 
 
