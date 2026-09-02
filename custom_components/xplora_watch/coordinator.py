@@ -1369,8 +1369,12 @@ class XploraDataUpdateCoordinator(DataUpdateCoordinator):
         cached = self._loc_history.get(wuid, {})
         if not force and day_key != today and day_key in cached:
             return list(cached[day_key])  # immutable past day already cached -> no network
-        # Day 0 (today) keeps the proven `date=None` call; a past day passes its explicit epoch date.
-        date_param = None if day_key == today else self._day_key_to_date_param(day_key, tzinfo)
+        # X6SE can return a non-empty but incomplete track for today's `date=None` query (confirmed
+        # by comparing the live cache with a later explicit-day fetch). Use the explicit date for
+        # that model from the outset; other models keep the established `date=None` Today query.
+        model = ((self.controller.getDevice(wuid) or {}).get("getWatches") or {}).get("model")
+        explicit_day = day_key != today or model == "X6SE"
+        date_param = self._day_key_to_date_param(day_key, tzinfo) if explicit_day else None
         try:
             # Routed through the centralized gate so a single expired token is recovered ONCE here
             # at the source (bounded refresh -> retry) instead of surfacing to every caller
@@ -1384,37 +1388,7 @@ class XploraDataUpdateCoordinator(DataUpdateCoordinator):
             self._log.debug("location-history fetch failed for ...%s day %s (ignored): %s", wuid[25:], day_key, err)
             return list(cached.get(day_key, []))
 
-        # The captured X6SE log returned an empty list for today's date=None request even though the
-        # official app showed a track. Explicit-date compatibility is a deliberately narrow retry:
-        # keep the established query first, then try the alternate API parameter only for this
-        # model and symptom. Other models and non-empty responses incur no extra request.
         raw_list = (raw or {}).get("locHistory", {}).get("list", []) or []
-        model = ((self.controller.getDevice(wuid) or {}).get("getWatches") or {}).get("model")
-        if day_key == today and date_param is None and model == "X6SE" and not raw_list:
-            explicit_date = self._day_key_to_date_param(day_key, tzinfo)
-            if explicit_date is not None:
-                try:
-                    retry_raw = await self._with_recovery(
-                        lambda: self.controller.getWatchLocHistory(
-                            wuid, date=explicit_date, tz=self._history_tz(), limit=LOC_HISTORY_FETCH_LIMIT
-                        )
-                    )
-                except RateLimitError, XploraConnectionError, AuthError:
-                    raise
-                except Error as err:
-                    self._log.debug("LocHistory X6SE fallback failed for ...%s day %s (ignored): %s", wuid[25:], day_key, err)
-                else:
-                    retry_list = (retry_raw or {}).get("locHistory", {}).get("list", []) or []
-                    self._log.debug(
-                        "LocHistory X6SE fallback ...%s day %s (date=%s) -> %d raw",
-                        wuid[25:],
-                        day_key,
-                        explicit_date,
-                        len(retry_list),
-                    )
-                    if retry_list:
-                        raw = retry_raw
-                        raw_list = retry_list
         points = sorted(self._parse_loc_history(raw), key=lambda p: p[ATTR_HISTORY_TM])
         # Debug breadcrumb: the line to read when verifying the `date`/`tm` semantics -- it shows the
         # request params and the FIRST raw `tm` (so seconds-vs-ms is obvious). Coordinates are
@@ -1501,9 +1475,10 @@ class XploraDataUpdateCoordinator(DataUpdateCoordinator):
         Scheduled via ``async_track_time_change`` at ``AUTO_FETCH_HISTORY_HOUR`` in Home Assistant's
         local time; the day itself (``history_yesterday_key``) is resolved in the watch timezone --
         the same default the manual ``fetch_history`` service uses, so the two agree except when the
-        watch timezone differs sharply from HA's. ``async_fetch_history_day`` already serves an
-        already-cached past day from the Store without a network call (``force=False``), so this is a
-        no-op for days already archived -- no separate pre-check needed.
+        watch timezone differs sharply from HA's. The fetch is forced even when yesterday already
+        exists in the Store: the live Today queries can be incomplete during school mode, while the
+        explicit past-day query later contains the missing points. ``_store_day`` merges that final
+        response into the accumulated bucket without shrinking it.
 
         Errors are handled like the ``fetch_history`` service rather than propagating out of the
         timer callback: a refused/expired token (or a transient rate-limit/connection failure) is
@@ -1514,7 +1489,7 @@ class XploraDataUpdateCoordinator(DataUpdateCoordinator):
         try:
             for wuid in self._configured_wuids:
                 self._log.debug("Auto-fetching history for watch %s, day %s", wuid, yesterday)
-                await self.async_fetch_history_day(wuid, yesterday)
+                await self.async_fetch_history_day(wuid, yesterday, force=True)
         except AuthError:
             self._log.warning("Auto-fetch history: Xplora session expired; skipping until the next login")
         except (RateLimitError, XploraConnectionError) as err:

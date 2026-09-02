@@ -105,15 +105,15 @@ async def test_auto_fetch_calls_fetch_when_not_cached(coordinator: XploraDataUpd
     mock.assert_called_once()
 
 
-async def test_auto_fetch_skips_network_when_already_cached(coordinator: XploraDataUpdateCoordinator) -> None:
-    """A day already cached is served from the Store -- ``async_fetch_history_day`` hits no network."""
+async def test_auto_fetch_forces_network_when_already_cached(coordinator: XploraDataUpdateCoordinator) -> None:
+    """Yesterday is finalized from the API even when live polling already created its bucket."""
     yesterday = coordinator.history_yesterday_key()
     coordinator._loc_history.setdefault(DEFAULT_WUID, {})[yesterday] = []
 
     mock = _patch_loc_history(coordinator)
     await coordinator._async_auto_fetch_yesterday(datetime.now())
 
-    mock.assert_not_called()
+    mock.assert_called_once()
 
 
 async def test_auto_fetch_refreshes_listeners(coordinator: XploraDataUpdateCoordinator) -> None:

@@ -123,6 +123,7 @@ async def test_today_is_always_fetched_fresh(coordinator: XploraDataUpdateCoordi
     await coordinator.async_fetch_history_day(DEFAULT_WUID, today)
     await coordinator.async_fetch_history_day(DEFAULT_WUID, today)
     assert mock.call_count == 2
+    assert all(call.kwargs["date"] is None for call in mock.await_args_list)
 
 
 async def test_concurrent_today_reads_share_one_request(coordinator: XploraDataUpdateCoordinator) -> None:
@@ -151,18 +152,17 @@ async def test_concurrent_today_reads_share_one_request(coordinator: XploraDataU
     assert coordinator._inflight_history == {}
 
 
-async def test_x6se_empty_today_retries_with_explicit_date(coordinator: XploraDataUpdateCoordinator) -> None:
-    """X6SE keeps date=None first and retries once with a concrete day only when empty."""
+async def test_x6se_today_uses_one_explicit_date_request(coordinator: XploraDataUpdateCoordinator) -> None:
+    """X6SE avoids the non-empty-but-partial date=None response with one explicit-day request."""
     coordinator.controller.getDevice = lambda _wuid: {"getWatches": {"model": "X6SE"}}  # type: ignore[method-assign]
-    mock = AsyncMock(side_effect=[{"locHistory": {"list": []}}, make_loc_history_payload()])
+    mock = AsyncMock(return_value=make_loc_history_payload())
     coordinator.controller.getWatchLocHistory = mock  # type: ignore[method-assign]
 
     points = await coordinator.async_fetch_history_day(DEFAULT_WUID, _today(coordinator))
 
     assert len(points) == 2
-    assert mock.await_count == 2
-    assert mock.await_args_list[0].kwargs["date"] is None
-    assert mock.await_args_list[1].kwargs["date"] is not None
+    assert mock.await_count == 1
+    assert mock.await_args.kwargs["date"] is not None
 
 
 async def test_past_day_is_cached_after_first_fetch(coordinator: XploraDataUpdateCoordinator) -> None:
