@@ -92,7 +92,6 @@
       "init": {
         "data": {
           "auto_fetch_history": "Obtener automáticamente el historial de ubicación de ayer",
-          "auto_mark_read": "Marcar los mensajes de chat como leídos al sondear",
           "history_retention_days": "Retención del historial de ubicaciones (días)",
           "home_is_safezone": "El hogar es una zona segura",
           "home_latitude": "Latitud del hogar",

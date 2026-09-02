@@ -35,7 +35,6 @@ from homeassistant.const import CONF_LANGUAGE, CONF_SCAN_INTERVAL, STATE_OFF
 from .const import (
     CONF_ACCOUNT_ALIAS,
     CONF_AUTO_FETCH_HISTORY,
-    CONF_AUTO_MARK_READ,
     CONF_HISTORY_RETENTION_DAYS,
     CONF_HOME_SAFEZONE,
     CONF_MAPS,
@@ -76,7 +75,6 @@ class ConfKeys(StrEnum):
     """
 
     AUTO_FETCH_HISTORY = CONF_AUTO_FETCH_HISTORY
-    AUTO_MARK_READ = CONF_AUTO_MARK_READ
     HISTORY_RETENTION_DAYS = CONF_HISTORY_RETENTION_DAYS
     HOME_IS_SAFEZONE = CONF_HOME_SAFEZONE
     MAPS = CONF_MAPS
@@ -127,7 +125,6 @@ class _Converters:
 # Defaults MUST match the historical inline defaults so resolution is behavior-preserving.
 CONF_SPECS: dict[ConfKeys, _ConfSpec[Any]] = {
     ConfKeys.AUTO_FETCH_HISTORY: _ConfSpec(default=DEFAULT_AUTO_FETCH_HISTORY, converter=_Converters.to_bool),
-    ConfKeys.AUTO_MARK_READ: _ConfSpec(default=False, converter=_Converters.to_bool),
     # The converter clamps to the supported day range (and never raises).
     ConfKeys.HISTORY_RETENTION_DAYS: _ConfSpec(default=DEFAULT_HISTORY_RETENTION_DAYS, converter=normalize_history_retention_days),
     ConfKeys.HOME_IS_SAFEZONE: _ConfSpec(default=STATE_OFF, converter=_Converters.to_str),
@@ -151,7 +148,6 @@ class ResolvedOptions:
     """
 
     auto_fetch_history: bool
-    auto_mark_read: bool
     history_retention_days: int
     home_is_safezone: str
     maps: str

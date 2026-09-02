@@ -20,7 +20,8 @@ messaging services lives on their feature pages, linked below; this page is the 
 | Service | Purpose |
 | --- | --- |
 | `xplora_watch.send_message` | Send a notification to the watch. See [Send a message](send-message.md). |
-| `xplora_watch.read_message` | Read messages from the watch. |
+| `xplora_watch.read_message` | Fetch messages from the watch without changing their read status. |
+| `xplora_watch.mark_message_read` | Mark one specific message read. The bundled chat card calls this only after visible content has been viewed or media playback has finished. |
 | `xplora_watch.delete_message_from_app` | Delete a message in the Xplora® app. |
 
 ## Alarms

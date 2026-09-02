@@ -1,4 +1,4 @@
-"""Tests for the scan-interval presets/normalization and the auto-mark-read toggle plumbing."""
+"""Tests for scan intervals and the low-level, explicitly-requested read-receipt helper."""
 
 from __future__ import annotations
 
@@ -89,21 +89,8 @@ async def test_update_interval_from_option(hass: HomeAssistant, value: Any, expe
     assert coord.update_interval == expected
 
 
-async def test_data_loop_passes_auto_mark_read_through(coordinator: XploraDataUpdateCoordinator, monkeypatch: pytest.MonkeyPatch) -> None:
-    """data_loop forwards its auto_mark_read flag to the controller's getWatchChatsRaw."""
-    captured: dict[str, Any] = {}
-
-    async def _fake_chats(wuid: str, **kwargs: Any) -> dict[str, Any]:
-        captured.update(kwargs)
-        return {"list": []}
-
-    monkeypatch.setattr(coordinator.controller, "getWatchChatsRaw", _fake_chats)
-    await coordinator.data_loop([DEFAULT_WUID], message_limit=10, remove_message=False, auto_mark_read=True)
-    assert captured["mark_as_read"] is True
-
-
-async def test_data_loop_defaults_to_not_marking_read(coordinator: XploraDataUpdateCoordinator, monkeypatch: pytest.MonkeyPatch) -> None:
-    """With auto_mark_read unset, the read-receipt write is off by default."""
+async def test_data_loop_never_marks_messages_read(coordinator: XploraDataUpdateCoordinator, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fetching chat data is side-effect free; only the explicit mark service writes receipts."""
     captured: dict[str, Any] = {}
 
     async def _fake_chats(wuid: str, **kwargs: Any) -> dict[str, Any]:

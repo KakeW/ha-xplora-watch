@@ -616,7 +616,7 @@ class XploraDataUpdateCoordinator(DataUpdateCoordinator):
 
         opts = self._resolved
         return await self.data_loop(
-            wuids, opts.message, opts.remove_message, opts.auto_mark_read, include_chats=include_chats, include_history=include_history
+            wuids, opts.message, opts.remove_message, include_chats=include_chats, include_history=include_history
         )
 
     async def async_update_xplora_data(
@@ -854,7 +854,6 @@ class XploraDataUpdateCoordinator(DataUpdateCoordinator):
         wuids: list[str],
         message_limit: int,
         remove_message: bool,
-        auto_mark_read: bool = False,
         include_chats: bool = True,
         include_history: bool = False,
     ) -> dict:
@@ -880,7 +879,7 @@ class XploraDataUpdateCoordinator(DataUpdateCoordinator):
             responded = await self._refresh_watch_fix(wuid)
             if include_chats:
                 res_chats = await self.controller.getWatchChatsRaw(
-                    wuid, limit=message_limit, show_del_msg=remove_message, mark_as_read=auto_mark_read
+                    wuid, limit=message_limit, show_del_msg=remove_message, mark_as_read=False
                 )
                 if isinstance(res_chats, ChatsNew):
                     res_chats = res_chats.to_dict()
@@ -1562,9 +1561,8 @@ class XploraDataUpdateCoordinator(DataUpdateCoordinator):
         if self.data:
             watch_entry.update(self.data)
         self._log.debug("Fetch message data from Xplora: %s", wuid[25:])
-        auto_mark_read = self._resolved.auto_mark_read
         res_chats = await self.controller.getWatchChatsRaw(
-            wuid, limit=message_limit, show_del_msg=remove_message, mark_as_read=auto_mark_read
+            wuid, limit=message_limit, show_del_msg=remove_message, mark_as_read=False
         )
         if isinstance(res_chats, ChatsNew):
             res_chats = res_chats.to_dict()
@@ -1572,3 +1570,34 @@ class XploraDataUpdateCoordinator(DataUpdateCoordinator):
         watch_entry.update({wuid: {SENSOR_MESSAGE: chats}})
         self.data = watch_entry
         return res_chats
+
+    async def async_mark_chat_message_read(self, wuid: str, msg_id: str, chat_id: str) -> bool:
+        """Write one read receipt and atomically mirror it into coordinator state."""
+        async with self._update_lock:
+            await self._with_recovery(lambda: self.controller.set_read_chat_msg(wuid, msg_id, chat_id))
+
+            # The mutation has no useful count payload. Mirror the confirmed write locally so the
+            # dashboard updates immediately rather than waiting for the next deviceList poll. The
+            # shared coordinator lock keeps simultaneous receipts (or a receipt racing a poll)
+            # from losing one another's unread-count decrement.
+            new_data = dict(self.data or {})
+            watch_data = dict(new_data.get(wuid) or {})
+            chats = dict(watch_data.get(SENSOR_MESSAGE) or {})
+            messages = []
+            newly_marked = False
+            for message in chats.get("list") or []:
+                item = dict(message)
+                if str(item.get("msgId", "")) == msg_id:
+                    if not item.get("readFlag"):
+                        newly_marked = True
+                    item["readFlag"] = 1
+                messages.append(item)
+            if messages:
+                chats["list"] = messages
+                watch_data[SENSOR_MESSAGE] = chats
+            unread = watch_data.get("unreadMsg")
+            if newly_marked and isinstance(unread, int) and unread > 0:
+                watch_data["unreadMsg"] = unread - 1
+            new_data[wuid] = watch_data
+            await self.async_update_xplora_data(new_data=new_data)
+            return True

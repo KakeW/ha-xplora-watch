@@ -36,7 +36,6 @@ def test_resolve_empty_returns_defaults() -> None:
     resolved = resolve({})
     assert resolved == ResolvedOptions(
         auto_fetch_history=False,
-        auto_mark_read=False,
         history_retention_days=DEFAULT_HISTORY_RETENTION_DAYS,
         home_is_safezone=STATE_OFF,
         maps=MAPS[0],
@@ -59,7 +58,6 @@ def test_resolve_honors_and_coerces_provided_values() -> None:
     resolved = resolve(
         {
             "message": "7",  # str -> int
-            "auto_mark_read": "true",  # str -> bool
             "remove_message": 1,  # int -> bool
             "maps": MAPS[1],
             "opencage_apikey": "key",
@@ -67,7 +65,6 @@ def test_resolve_honors_and_coerces_provided_values() -> None:
         }
     )
     assert resolved.message == 7
-    assert resolved.auto_mark_read is True
     assert resolved.remove_message is True
     assert resolved.maps == MAPS[1]
     assert resolved.opencage_apikey == "key"

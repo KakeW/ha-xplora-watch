@@ -94,7 +94,6 @@
         "data": {
           "account_alias": "Account alias",
           "auto_fetch_history": "Automatically fetch yesterday's location history",
-          "auto_mark_read": "Mark chat messages as read while polling",
           "history_retention_days": "Location history retention (days)",
           "home_is_safezone": "Home is Safezone",
           "home_latitude": "Home latitude",

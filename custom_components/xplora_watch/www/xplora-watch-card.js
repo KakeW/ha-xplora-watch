@@ -3371,7 +3371,14 @@ window.customCards.push({
 const CHAT_SERVICE = Object.freeze({
   SEND: "send_message",
   READ: "read_message",
+  MARK_READ: "mark_message_read",
 });
+
+// A message must stay substantially visible for this long before text / emoji / image content is
+// considered read. This prevents a fast scroll (or the initial layout settling) from acknowledging
+// messages the user never had a realistic chance to see. Voice/video are acknowledged only by
+// their media element's `ended` event instead.
+const READ_DWELL_MS = 700;
 
 // Media base paths (the integration writes downloaded attachments here, keyed by msgId).
 const MEDIA = Object.freeze({
@@ -3421,6 +3428,10 @@ class XploraWatchChatCard extends HTMLElement {
     this._pending = []; // optimistically-rendered sent messages awaiting the server echo
     this._localSeq = 0; // monotonic id source for optimistic messages
     this._forceScroll = false; // force a scroll-to-bottom on the next render (set right after a send)
+    this._readRequested = new Set(); // msgIds already acknowledged (or currently in flight)
+    this._readTimers = new Map(); // visible bubble -> dwell timer
+    this._readQueue = Promise.resolve(); // serialize receipts so unread-count decrements cannot race
+    this._readObserver = null;
     this._native = false; // native (Fullscreen API) fullscreen is active for this card
     this._cssExpanded = false; // CSS-maximize fallback active (when the Fullscreen API is unavailable)
     // The browser can leave native fullscreen without going through our button (Esc key, browser UI).
@@ -3445,6 +3456,10 @@ class XploraWatchChatCard extends HTMLElement {
   disconnectedCallback() {
     document.removeEventListener("fullscreenchange", this._onFsChange);
     window.removeEventListener("keydown", this._onLightboxKey);
+    if (this._readObserver) this._readObserver.disconnect();
+    this._readObserver = null;
+    this._readTimers.forEach((timer) => clearTimeout(timer));
+    this._readTimers.clear();
     // Best-effort: don't leave the page stuck in fullscreen if the card is removed while expanded.
     if (this._native && document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(() => {});
   }
@@ -3805,7 +3820,13 @@ class XploraWatchChatCard extends HTMLElement {
       if (node !== want) el.insertBefore(node, want);
       cursor = node;
     }
-    existing.forEach((n) => n.remove());
+    existing.forEach((n) => {
+      if (this._readObserver) this._readObserver.unobserve(n);
+      const timer = this._readTimers.get(n);
+      if (timer) clearTimeout(timer);
+      this._readTimers.delete(n);
+      n.remove();
+    });
 
     if (pinned && appended) this._scrollToBottom();
   }
@@ -3824,6 +3845,7 @@ class XploraWatchChatCard extends HTMLElement {
     const tpl = document.createElement("template");
     tpl.innerHTML = this._bubble(msg).trim();
     const node = tpl.content.firstElementChild;
+    this._wireReadReceipt(node, msg);
     node.querySelectorAll(".media-img, .media-audio, .media-video").forEach((m) => {
       m.addEventListener(
         "error",
@@ -3849,6 +3871,75 @@ class XploraWatchChatCard extends HTMLElement {
       );
     });
     return node;
+  }
+
+  // Only incoming, server-backed messages that still carry a falsy readFlag are candidates. A
+  // local optimistic send has no server ids and outgoing messages must never affect the watch's
+  // unread counter.
+  _isUnreadIncoming(msg) {
+    return !!(msg && this._incoming(msg) && msg.msgId && msg.id && !msg.readFlag);
+  }
+
+  _ensureReadObserver() {
+    if (this._readObserver || typeof IntersectionObserver === "undefined") return;
+    this._readObserver = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          const node = entry.target;
+          const msg = node._xploraReadMessage;
+          if (!msg || !this._isUnreadIncoming(msg)) return;
+          if (entry.isIntersecting && entry.intersectionRatio >= 0.6) {
+            if (this._readTimers.has(node)) return;
+            const timer = setTimeout(() => {
+              this._readTimers.delete(node);
+              this._markMessageRead(msg);
+            }, READ_DWELL_MS);
+            this._readTimers.set(node, timer);
+          } else {
+            const timer = this._readTimers.get(node);
+            if (timer) clearTimeout(timer);
+            this._readTimers.delete(node);
+          }
+        });
+      },
+      { root: this._listEl || null, threshold: [0, 0.6] },
+    );
+  }
+
+  _wireReadReceipt(node, msg) {
+    if (!this._isUnreadIncoming(msg)) return;
+    node._xploraReadMessage = msg;
+    const type = String(msg.type || "").toUpperCase();
+    if (type === "VOICE" || type === "SHORT_VIDEO") {
+      const media = node.querySelector(type === "VOICE" ? ".media-audio" : ".media-video");
+      if (media) media.addEventListener("ended", () => this._markMessageRead(msg), { once: true });
+      return;
+    }
+    this._ensureReadObserver();
+    if (this._readObserver) this._readObserver.observe(node);
+  }
+
+  _markMessageRead(msg) {
+    if (!this._hass || !this._isUnreadIncoming(msg)) return;
+    const msgId = String(msg.msgId);
+    if (this._readRequested.has(msgId)) return;
+    this._readRequested.add(msgId);
+    // Keep receipts sequential. Several text bubbles can become visible together; serial service
+    // calls ensure each backend confirmation sees the unread count left by the previous one.
+    this._readQueue = this._readQueue
+      .then(() =>
+        this._hass.callService(
+          DOMAIN,
+          CHAT_SERVICE.MARK_READ,
+          { ...this._base(), message_id: msgId, chat_id: String(msg.id) },
+          undefined,
+          false,
+        ),
+      )
+      .catch((err) => {
+        this._readRequested.delete(msgId); // allow a later visibility/play event to retry
+        this._notify(`Xplora watch: ${err && err.message ? err.message : "could not mark message read"}`);
+      });
   }
 
   // Pin the list to the newest message. Media (images/videos) load asynchronously and grow the

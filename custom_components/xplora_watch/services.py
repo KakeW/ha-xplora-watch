@@ -32,6 +32,7 @@ from .config import resolve
 from .const import (
     ATTR_ALARM,
     ATTR_SERVICE_ALARM_ID,
+    ATTR_SERVICE_CHAT_ID,
     ATTR_SERVICE_CREATE_ALARM,
     ATTR_SERVICE_CREATE_SILENT,
     ATTR_SERVICE_DATE,
@@ -42,6 +43,7 @@ from .const import (
     ATTR_SERVICE_END,
     ATTR_SERVICE_FETCH_HISTORY,
     ATTR_SERVICE_LOGOUT,
+    ATTR_SERVICE_MARK_MSG_READ,
     ATTR_SERVICE_MSG,
     ATTR_SERVICE_MSGID,
     ATTR_SERVICE_NAME,
@@ -113,6 +115,12 @@ BASE_REBOOT_SERVICE_SCHEMA = _target_schema()
 BASE_LOGOUT_SERVICE_SCHEMA = _target_schema()
 BASE_DELETE_MESSAGE_SERVICE_SCHEMA = _target_schema({vol.Required(ATTR_SERVICE_MSGID): cv.string})
 BASE_READ_MESSAGE_SERVICE_SCHEMA = _target_schema()
+BASE_MARK_MESSAGE_READ_SERVICE_SCHEMA = _target_schema(
+    {
+        vol.Required(ATTR_SERVICE_MSGID): cv.string,
+        vol.Required(ATTR_SERVICE_CHAT_ID): cv.string,
+    }
+)
 BASE_SEND_MESSAGE_SERVICE_SCHEMA = _target_schema({vol.Required(ATTR_SERVICE_MSG): cv.string})
 BASE_SEE_SERVICE_SCHEMA = _target_schema()
 # On-demand refresh of alarms/silent-times/safe-zones (the "functions" data that has its own,
@@ -500,6 +508,9 @@ async def async_setup_services(hass: HomeAssistant, entry_id: str) -> None:
     async def async_read_message(service: ServiceCall) -> None:
         await sensor_update_service.async_read_message(kwargs=dict(service.data))
 
+    async def async_mark_message_read(service: ServiceCall) -> None:
+        await sensor_update_service.async_mark_message_read(kwargs=dict(service.data))
+
     async def async_shutdown(service: ServiceCall) -> None:
         await shutdown_service.async_shutdown(kwargs=dict(service.data))
 
@@ -550,6 +561,12 @@ async def async_setup_services(hass: HomeAssistant, entry_id: str) -> None:
     hass.services.async_register(DOMAIN, ATTR_SERVICE_LOGOUT, async_logout, schema=BASE_LOGOUT_SERVICE_SCHEMA)
     hass.services.async_register(DOMAIN, ATTR_SERVICE_DELETE_MSG, async_delete_message_from_app, schema=BASE_DELETE_MESSAGE_SERVICE_SCHEMA)
     hass.services.async_register(DOMAIN, ATTR_SERVICE_READ_MSG, async_read_message, schema=BASE_READ_MESSAGE_SERVICE_SCHEMA)
+    hass.services.async_register(
+        DOMAIN,
+        ATTR_SERVICE_MARK_MSG_READ,
+        async_mark_message_read,
+        schema=BASE_MARK_MESSAGE_READ_SERVICE_SCHEMA,
+    )
     hass.services.async_register(DOMAIN, ATTR_SERVICE_SEND_MSG, async_send_message, schema=BASE_SEND_MESSAGE_SERVICE_SCHEMA)
     hass.services.async_register(DOMAIN, ATTR_SERVICE_SEE, async_see, schema=BASE_SEE_SERVICE_SCHEMA)
     hass.services.async_register(
@@ -898,6 +915,26 @@ class XploraMessageSensorUpdateService(XploraService):
             await coordinator.async_update_xplora_data(new_data=old_state)
 
         await self._fan_out(data, ATTR_SERVICE_READ_MSG, body)
+
+    async def async_mark_message_read(self, **kwargs: Any) -> None:
+        """Mark one incoming chat message read and update HA's cached unread count."""
+        data = kwargs["kwargs"]
+        msg_id = str(data[ATTR_SERVICE_MSGID])
+        chat_id = str(data[ATTR_SERVICE_CHAT_ID])
+
+        async def body(account: _Account) -> None:
+            coordinator = account.coordinator
+            for watch in account.wuids:
+                await account.call(
+                    "Mark message read",
+                    watch,
+                    lambda w=watch: coordinator.async_mark_chat_message_read(w, msg_id, chat_id),
+                    recover=False,
+                )
+                if account.broken:
+                    break
+
+        await self._fan_out(data, ATTR_SERVICE_MARK_MSG_READ, body)
 
     async def _fetch_chat_voice(self, coordinator: XploraDataUpdateCoordinator, watch_id: str, msg_id: str) -> None:
         # `coordinator` is passed in (not read from instance state) so concurrent read_message calls

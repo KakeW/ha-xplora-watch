@@ -31,7 +31,8 @@ The first time Home Assistant starts on the new code:
 3. Restart Home Assistant once after upgrading so the entity/option migrations above can run.
 4. Open the integration's **Options** afterward and review the settings this fork adds: the scan
    interval is now a fixed dropdown of presets (instead of a free-form number) and there's a new
-   "Mark chat messages as read while polling" toggle (`auto_mark_read`, default off).
+   Read receipts are handled by the bundled chat card when a message is actually viewed or played;
+   polling never marks messages read.
 5. For the rate-limit-safe behavior this fork exists to provide, consider setting the scan interval
    to **Off** and driving updates via the `xplora_watch.see` service on your own schedule instead of
    keeping a migrated polling interval — see [Update interval (polling)](polling.md).

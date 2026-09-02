@@ -6,13 +6,14 @@ the dispatch + state-merge behavior is driven end-to-end through `hass.services.
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ServiceValidationError
 
-from custom_components.xplora_watch.const import ATTR_SERVICE_READ_MSG, DOMAIN, SENSOR_MESSAGE
+from custom_components.xplora_watch.const import ATTR_SERVICE_MARK_MSG_READ, ATTR_SERVICE_READ_MSG, DOMAIN, SENSOR_MESSAGE
 from custom_components.xplora_watch.coordinator import XploraDataUpdateCoordinator
 from custom_components.xplora_watch.services import XploraMessageSensorUpdateService
 from tests.xplora_watch.fixtures.graphql_payloads import DEFAULT_USER_ID, DEFAULT_WUID
@@ -96,6 +97,76 @@ async def test_existing_watch_entry_in_old_state_gets_updated_with_new_messages(
 
     updated_messages = coordinator_with_data.data[DEFAULT_WUID][SENSOR_MESSAGE]
     assert updated_messages["list"][0]["msgId"] == "msg-0"
+
+
+async def test_read_message_fetch_never_sends_read_receipts(
+    hass: HomeAssistant, coordinator_with_data: XploraDataUpdateCoordinator, graphql_operations
+) -> None:
+    """A refresh/download is not proof that the user actually viewed the message."""
+    _set_chats_fixture(graphql_operations, ["TEXT"])
+    devices = await setup_service_target(hass, coordinator_with_data)
+
+    with patch.object(coordinator_with_data.controller, "set_read_chat_msg", new=AsyncMock()) as mark_read:
+        await hass.services.async_call(
+            DOMAIN,
+            ATTR_SERVICE_READ_MSG,
+            {"device_id": [devices[DEFAULT_WUID]]},
+            blocking=True,
+        )
+
+    mark_read.assert_not_awaited()
+
+
+async def test_explicit_mark_read_updates_message_and_unread_count_immediately(
+    hass: HomeAssistant, coordinator_with_data: XploraDataUpdateCoordinator
+) -> None:
+    """A confirmed per-message receipt is mirrored locally without waiting for the next poll."""
+    devices = await setup_service_target(hass, coordinator_with_data)
+    coordinator_with_data.data[DEFAULT_WUID][SENSOR_MESSAGE] = {
+        "list": [_make_raw_chat("msg-0", "TEXT"), _make_raw_chat("msg-1", "VOICE")]
+    }
+    coordinator_with_data.data[DEFAULT_WUID]["unreadMsg"] = 2
+
+    with patch.object(
+        coordinator_with_data.controller,
+        "set_read_chat_msg",
+        new=AsyncMock(return_value={"setReadChatMsg": {}}),
+    ) as mark_read:
+        await hass.services.async_call(
+            DOMAIN,
+            ATTR_SERVICE_MARK_MSG_READ,
+            {"device_id": [devices[DEFAULT_WUID]], "message_id": "msg-0", "chat_id": "id-msg-0"},
+            blocking=True,
+        )
+
+    mark_read.assert_awaited_once_with(DEFAULT_WUID, "msg-0", "id-msg-0")
+    messages = coordinator_with_data.data[DEFAULT_WUID][SENSOR_MESSAGE]["list"]
+    assert messages[0]["readFlag"] == 1
+    assert messages[1]["readFlag"] == 0
+    assert coordinator_with_data.data[DEFAULT_WUID]["unreadMsg"] == 1
+
+
+async def test_concurrent_receipts_do_not_lose_unread_count_decrements(
+    coordinator_with_data: XploraDataUpdateCoordinator,
+) -> None:
+    """Two cards acknowledging different bubbles at once are serialized by the coordinator."""
+    coordinator_with_data.data[DEFAULT_WUID][SENSOR_MESSAGE] = {
+        "list": [_make_raw_chat("msg-0", "TEXT"), _make_raw_chat("msg-1", "TEXT")]
+    }
+    coordinator_with_data.data[DEFAULT_WUID]["unreadMsg"] = 2
+
+    with patch.object(
+        coordinator_with_data.controller,
+        "set_read_chat_msg",
+        new=AsyncMock(return_value={"setReadChatMsg": {}}),
+    ):
+        await asyncio.gather(
+            coordinator_with_data.async_mark_chat_message_read(DEFAULT_WUID, "msg-0", "id-msg-0"),
+            coordinator_with_data.async_mark_chat_message_read(DEFAULT_WUID, "msg-1", "id-msg-1"),
+        )
+
+    assert coordinator_with_data.data[DEFAULT_WUID]["unreadMsg"] == 0
+    assert [m["readFlag"] for m in coordinator_with_data.data[DEFAULT_WUID][SENSOR_MESSAGE]["list"]] == [1, 1]
 
 
 async def test_watch_not_already_in_old_state_still_gets_an_entry_via_message_data(

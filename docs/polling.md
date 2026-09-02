@@ -43,8 +43,9 @@ their **own** interval in _Options_, **"Alarms/silent/safe-zone refresh"**:
 - The alarm/silent edit services (create/update/delete/enable) always refresh their own list
   immediately, so changes you make show up regardless of this setting.
 
-## Auto-mark messages as read
+## Message read receipts
 
-A separate _Options_ toggle, **"Mark chat messages as read while polling"** (default **off**),
-controls whether fetched chat messages are marked read on Xplora's servers. Leaving it off
-preserves the unread-message count and avoids extra write traffic.
+Fetching or polling chat data never marks messages read. The bundled chat card acknowledges an
+incoming text, emoji or image only after its bubble has remained visible, and acknowledges voice
+and video only after playback finishes. Merely loading a dashboard or refreshing chat data does not
+change the unread count.

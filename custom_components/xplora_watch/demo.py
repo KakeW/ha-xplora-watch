@@ -633,6 +633,10 @@ class DemoPyXploraApi(PyXploraApi):
         """No-op mutator: demo mode has no server to send to."""
         return True
 
+    async def set_read_chat_msg(self, wuid: str, msgId: str = "", _id: str = "") -> dict[str, Any]:
+        """Accept a demo read receipt without touching the network."""
+        return {"setReadChatMsg": {}}
+
     async def get_chat_voice(self, wuid: str, msgId: str) -> str | None:
         """Return the bundled AMR sample (base64) for the demo voice message, else nothing.
 

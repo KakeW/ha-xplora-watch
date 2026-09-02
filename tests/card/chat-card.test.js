@@ -59,6 +59,82 @@ describe("rendering", () => {
   });
 });
 
+describe("read receipts", () => {
+  it("does not mark a message merely because chat data was fetched/rendered", async () => {
+    const calls = [];
+    mountChat([chat("m1", { text: "hello" })], { callService: async (...args) => calls.push(args) });
+    await Promise.resolve();
+    expect(calls.filter((call) => call[1] === "mark_message_read")).toEqual([]);
+  });
+
+  it("marks a visible text message only after the visibility dwell", async () => {
+    vi.useFakeTimers();
+    const original = globalThis.IntersectionObserver;
+    let callback;
+    globalThis.IntersectionObserver = class {
+      constructor(cb) {
+        callback = cb;
+      }
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    };
+    try {
+      const calls = [];
+      const el = mountChat([chat("m1", { text: "hello" })], { callService: async (...args) => calls.push(args) });
+      const row = el.shadowRoot.querySelector('[data-key="m1"]');
+      callback([{ target: row, isIntersecting: true, intersectionRatio: 0.8 }]);
+
+      await vi.advanceTimersByTimeAsync(699);
+      expect(calls.filter((call) => call[1] === "mark_message_read")).toHaveLength(0);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(calls).toContainEqual([
+        "xplora_watch",
+        "mark_message_read",
+        { entity_id: ["sensor.watch_message"], message_id: "m1", chat_id: "id-m1" },
+        undefined,
+        false,
+      ]);
+    } finally {
+      globalThis.IntersectionObserver = original;
+      vi.useRealTimers();
+    }
+  });
+
+  it("marks a voice message only after playback ends", async () => {
+    const calls = [];
+    const el = mountChat([chat("voice-1", { type: "VOICE" })], { callService: async (...args) => calls.push(args) });
+    const audio = el.shadowRoot.querySelector(".media-audio");
+
+    audio.dispatchEvent(new Event("play"));
+    await Promise.resolve();
+    expect(calls.filter((call) => call[1] === "mark_message_read")).toHaveLength(0);
+
+    audio.dispatchEvent(new Event("ended"));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(calls).toContainEqual([
+      "xplora_watch",
+      "mark_message_read",
+      { entity_id: ["sensor.watch_message"], message_id: "voice-1", chat_id: "id-voice-1" },
+      undefined,
+      false,
+    ]);
+  });
+
+  it("never marks outgoing or already-read messages", async () => {
+    const calls = [];
+    const el = mountChat(
+      [chat("out", { sender: "acct1", text: "sent" }), chat("read", { text: "seen", readFlag: 1 })],
+      { callService: async (...args) => calls.push(args) },
+    );
+    el._markMessageRead(chat("out", { sender: "acct1", text: "sent" }));
+    el._markMessageRead(chat("read", { text: "seen", readFlag: 1 }));
+    await Promise.resolve();
+    expect(calls.filter((call) => call[1] === "mark_message_read")).toHaveLength(0);
+  });
+});
+
 describe("re-render guard (regression: last_updated vs last_changed)", () => {
   it("re-renders when a new message arrives as an attribute change (state value unchanged)", () => {
     const el = mountChat([chat("m1", { text: "first" })]);

@@ -165,7 +165,7 @@ logout:
       selector: *id001
   name: Log Out
 read_message:
-  description: Read messages from the watch.
+  description: Fetch messages from the watch without changing their read status.
   fields:
     device_id:
       description: The Xplora® watch(es) this action applies to.
@@ -173,6 +173,27 @@ read_message:
       required: true
       selector: *id001
   name: Read Messages
+mark_message_read:
+  description: Mark one message as read after it has actually been viewed or played.
+  fields:
+    message_id:
+      description: The Xplora message identifier.
+      name: Message ID
+      required: true
+      selector:
+        text: null
+    chat_id:
+      description: The Xplora internal chat identifier.
+      name: Chat ID
+      required: true
+      selector:
+        text: null
+    device_id:
+      description: The Xplora watch this message belongs to.
+      name: Watch
+      required: true
+      selector: *id001
+  name: Mark Message Read
 reboot:
   description: Reboot the watch.
   fields:

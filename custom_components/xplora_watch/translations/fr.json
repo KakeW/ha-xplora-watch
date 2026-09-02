@@ -92,7 +92,6 @@
       "init": {
         "data": {
           "auto_fetch_history": "Récupérer automatiquement l'historique de position d'hier",
-          "auto_mark_read": "Marquer les messages comme lus lors de l'interrogation",
           "history_retention_days": "Conservation de l'historique de position (jours)",
           "home_is_safezone": "La maison est une zone sûre",
           "home_latitude": "Latitude de la maison",

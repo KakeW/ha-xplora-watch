@@ -92,7 +92,6 @@
       "init": {
         "data": {
           "auto_fetch_history": "Gestrigen Standortverlauf automatisch abrufen",
-          "auto_mark_read": "Chat-Nachrichten beim Abrufen als gelesen markieren",
           "history_retention_days": "Aufbewahrung des Standortverlaufs (Tage)",
           "home_is_safezone": "Home ist Sicherheitszone",
           "home_latitude": "Home Latitude",

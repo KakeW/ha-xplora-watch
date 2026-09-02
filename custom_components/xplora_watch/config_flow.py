@@ -44,7 +44,6 @@ from .config import resolve_account_alias, resolve_language
 from .const import (
     CONF_ACCOUNT_ALIAS,
     CONF_AUTO_FETCH_HISTORY,
-    CONF_AUTO_MARK_READ,
     CONF_HISTORY_RETENTION_DAYS,
     CONF_HOME_LATITUDE,
     CONF_HOME_LONGITUDE,
@@ -379,7 +378,6 @@ class XploraOptionsFlowHandler(OptionsFlowWithConfigEntry):
                     ),
                 ),
                 vol.Required(CONF_REMOVE_MESSAGE, default=_options.get(CONF_REMOVE_MESSAGE, False)): BooleanSelector(),
-                vol.Required(CONF_AUTO_MARK_READ, default=_options.get(CONF_AUTO_MARK_READ, False)): BooleanSelector(),
                 vol.Required(
                     CONF_REFRESH_ON_CARD_RENDER,
                     default=_options.get(CONF_REFRESH_ON_CARD_RENDER, DEFAULT_REFRESH_ON_CARD_RENDER),

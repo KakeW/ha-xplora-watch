@@ -119,6 +119,12 @@ thread (and fetches any new attachments). A full-screen button expands the chat 
 — handy for long histories on a phone. The card opens straight from the **Unread** tile of the
 overview card too.
 
+Read receipts follow what the user actually consumes: an incoming text, emoji or image is marked
+read only after its bubble remains substantially visible in the open chat; a voice or video message
+is marked read only when playback reaches the end. Fetching messages, refreshing the dashboard or
+scrolling quickly past a bubble does not acknowledge it. The overview's unread count is updated as
+soon as each receipt succeeds.
+
 > [!NOTE]
 > The `*_message` sensor is **disabled by default** — enable it on the watch's device page before
 > adding the card. The card shows a placeholder until the sensor is available, and fetches the

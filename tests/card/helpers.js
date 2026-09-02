@@ -11,9 +11,14 @@ const MESSAGE_ENTITY = "sensor.watch_message";
 
 // A SimpleChat-shaped entry (see pyxplora_api/model.py). `sender` is the watch wuid for incoming
 // messages or the account id for ones we sent.
-export function chat(msgId, { type = "TEXT", sender = "watch1", text = "", emoticonId, emojiId, create = 1700000000000 } = {}) {
+export function chat(
+  msgId,
+  { type = "TEXT", sender = "watch1", text = "", emoticonId, emojiId, create = 1700000000000, readFlag = 0 } = {},
+) {
   return {
+    id: `id-${msgId}`,
     msgId,
+    readFlag,
     type,
     sender: { id: sender },
     data: { text, sender_name: "Dana", emoticon_id: emoticonId, emoji_id: emojiId },
