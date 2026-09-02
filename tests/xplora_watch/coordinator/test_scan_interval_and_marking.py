@@ -103,10 +103,10 @@ async def test_data_loop_never_marks_messages_read(coordinator: XploraDataUpdate
 
 
 def _two_chats() -> ChatsNew:
-    """One server-side unread message (readFlag 0) and one already-read (readFlag 1)."""
+    """One live-shape unread message (readFlag 2) and one other/non-unread flag."""
     return ChatsNew(
         [
-            SimpleChat(id="row-unread", msgId="msg-unread", readFlag=0, data=Data()),
+            SimpleChat(id="row-unread", msgId="msg-unread", readFlag=2, data=Data()),
             SimpleChat(id="row-read", msgId="msg-read", readFlag=1, data=Data()),
         ]
     )
@@ -118,8 +118,8 @@ async def test_getwatchchatsraw_marks_only_unread_when_enabled(
     """With mark_as_read on, a read receipt is sent only for messages still unread server-side.
 
     This is the actual ban-traffic fix: the old code re-marked the whole fetched window every
-    poll. `readFlag` truthiness must gate the `set_read_chat_msg` write so re-fetching already-read
-    history sends no mutations.
+    poll. Xplora's explicit unread value must gate the `set_read_chat_msg` write so re-fetching
+    already-read history sends no mutations.
     """
     read_calls: list[str] = []
 

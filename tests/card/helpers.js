@@ -13,7 +13,7 @@ const MESSAGE_ENTITY = "sensor.watch_message";
 // messages or the account id for ones we sent.
 export function chat(
   msgId,
-  { type = "TEXT", sender = "watch1", text = "", emoticonId, emojiId, create = 1700000000000, readFlag = 0 } = {},
+  { type = "TEXT", sender = "watch1", text = "", emoticonId, emojiId, create = 1700000000000, readFlag = 2 } = {},
 ) {
   return {
     id: `id-${msgId}`,

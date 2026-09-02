@@ -3379,6 +3379,9 @@ const CHAT_SERVICE = Object.freeze({
 // messages the user never had a realistic chance to see. Voice/video are acknowledged only by
 // their media element's `ended` event instead.
 const READ_DWELL_MS = 700;
+// Live Xplora evidence: the sole message counted by unreadChatMessageCount carried readFlag=2.
+// The field is not boolean; treating truthiness as "read" suppressed every receipt.
+const XPLORA_UNREAD_FLAG = 2;
 
 // Media base paths (the integration writes downloaded attachments here, keyed by msgId).
 const MEDIA = Object.freeze({
@@ -3873,11 +3876,18 @@ class XploraWatchChatCard extends HTMLElement {
     return node;
   }
 
-  // Only incoming, server-backed messages that still carry a falsy readFlag are candidates. A
+  // Only incoming, server-backed messages carrying Xplora's explicit unread value are candidates. A
   // local optimistic send has no server ids and outgoing messages must never affect the watch's
   // unread counter.
   _isUnreadIncoming(msg) {
-    return !!(msg && this._incoming(msg) && msg.msgId && msg.id && !msg.readFlag);
+    return !!(
+      msg &&
+      this._incoming(msg) &&
+      msg.msgId &&
+      msg.id &&
+      Number(msg.readFlag) === XPLORA_UNREAD_FLAG &&
+      !msg.haReadReceiptSent
+    );
   }
 
   _ensureReadObserver() {

@@ -13,6 +13,7 @@ from typing import Any, Optional, cast
 
 import aiohttp
 
+from ..const import CHAT_READ_FLAG_UNREAD
 from .const import ALL_WATCH_FUNCTIONS, MISSING_LOCATION_TM, WatchFunction
 from .exception_classes import Error, ErrorMSG, LoginError
 from .gql_handler_async import GQLHandler
@@ -667,15 +668,15 @@ class PyXploraApi(PyXplora):
                 # `with_emoji_id` (display: translate the emoticon id) and `mark_as_read`
                 # (server-side read receipt) are independent concerns -- they used to be
                 # conflated, so every poll silently marked the whole fetched window read. Only
-                # send a read receipt when explicitly enabled AND the message is still unread
-                # server-side (`readFlag` falsy), so we never re-mark the same history each poll.
+                # send a read receipt when explicitly enabled AND the message carries Xplora's
+                # observed unread value (`readFlag == 2`), so we never re-mark read history.
                 if with_emoji_id or mark_as_read:
                     for d in chat_list:
                         chat_data = cast(Data, d.data)
                         if with_emoji_id:
                             chat_data.emoji_id = chat_data.emoticon_id
                             chat_data.emoticon_id = Emoji[f"M{chat_data.emoticon_id}"].value
-                        if mark_as_read and not d.readFlag:
+                        if mark_as_read and d.readFlag == CHAT_READ_FLAG_UNREAD:
                             await self.set_read_chat_msg(wuid, cast(str, d.msgId), cast(str, d.id))
 
                 filtered_chats = [chat for chat in chat_list if show_del_msg or cast(Data, chat.data).delete_flag == 0]

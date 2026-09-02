@@ -133,6 +133,13 @@ describe("read receipts", () => {
     await Promise.resolve();
     expect(calls.filter((call) => call[1] === "mark_message_read")).toHaveLength(0);
   });
+
+  it("recognises live Xplora readFlag 2 as unread rather than applying boolean truthiness", () => {
+    const el = mountChat([]);
+    expect(el._isUnreadIncoming(chat("unread", { readFlag: 2 }))).toBe(true);
+    expect(el._isUnreadIncoming(chat("other", { readFlag: 1 }))).toBe(false);
+    expect(el._isUnreadIncoming({ ...chat("acked", { readFlag: 2 }), haReadReceiptSent: true })).toBe(false);
+  });
 });
 
 describe("re-render guard (regression: last_updated vs last_changed)", () => {

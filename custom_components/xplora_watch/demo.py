@@ -554,7 +554,7 @@ class DemoPyXploraApi(PyXploraApi):
             SimpleChat(
                 id="demo-msg-1",
                 msgId="demo-msg-1",
-                readFlag=0,
+                readFlag=2,
                 sender=child,
                 receiver=parent,
                 data=Data(tm=now - 3600, sender_name=profile.child_name, text=f"I'm at {profile.poi} with friends!"),
@@ -577,7 +577,7 @@ class DemoPyXploraApi(PyXploraApi):
                 SimpleChat(
                     id=DEMO_VOICE_MSG_ID,
                     msgId=DEMO_VOICE_MSG_ID,
-                    readFlag=0,
+                    readFlag=2,
                     sender=child,
                     receiver=parent,
                     data=Data(tm=now - 2400, sender_name=profile.child_name),

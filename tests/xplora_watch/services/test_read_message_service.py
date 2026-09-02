@@ -26,7 +26,7 @@ def _make_raw_chat(msg_id: str, chat_type: str) -> dict:
     return {
         "id": f"id-{msg_id}",
         "msgId": msg_id,
-        "readFlag": 0,
+        "readFlag": 2,
         "sender": {
             "id": DEFAULT_WUID,
             "userId": DEFAULT_WUID,
@@ -141,8 +141,9 @@ async def test_explicit_mark_read_updates_message_and_unread_count_immediately(
 
     mark_read.assert_awaited_once_with(DEFAULT_WUID, "msg-0", "id-msg-0")
     messages = coordinator_with_data.data[DEFAULT_WUID][SENSOR_MESSAGE]["list"]
-    assert messages[0]["readFlag"] == 1
-    assert messages[1]["readFlag"] == 0
+    assert messages[0]["readFlag"] == 2  # vendor flag is preserved; its post-read value is unknown
+    assert messages[0]["haReadReceiptSent"] is True
+    assert messages[1]["readFlag"] == 2
     assert coordinator_with_data.data[DEFAULT_WUID]["unreadMsg"] == 1
 
 
@@ -166,7 +167,9 @@ async def test_concurrent_receipts_do_not_lose_unread_count_decrements(
         )
 
     assert coordinator_with_data.data[DEFAULT_WUID]["unreadMsg"] == 0
-    assert [m["readFlag"] for m in coordinator_with_data.data[DEFAULT_WUID][SENSOR_MESSAGE]["list"]] == [1, 1]
+    messages = coordinator_with_data.data[DEFAULT_WUID][SENSOR_MESSAGE]["list"]
+    assert [m["readFlag"] for m in messages] == [2, 2]
+    assert [m["haReadReceiptSent"] for m in messages] == [True, True]
 
 
 async def test_watch_not_already_in_old_state_still_gets_an_entry_via_message_data(

@@ -23,6 +23,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from .config import ResolvedOptions, resolve, resolve_language
 from .const import (
     API_KEY_MAPBOX,
+    ATTR_CHAT_READ_RECEIPT_SENT,
     ATTR_HISTORY_ADDR,
     ATTR_HISTORY_CITY,
     ATTR_HISTORY_LAT,
@@ -45,6 +46,7 @@ from .const import (
     ATTR_WATCH,
     AUTO_FETCH_HISTORY_HOUR,
     BINARY_SENSOR_SAFEZONE,
+    CHAT_READ_FLAG_UNREAD,
     CONF_PHONENUMBER,
     CONF_TIMEZONE,
     CONF_USERLANG,
@@ -1588,9 +1590,11 @@ class XploraDataUpdateCoordinator(DataUpdateCoordinator):
             for message in chats.get("list") or []:
                 item = dict(message)
                 if str(item.get("msgId", "")) == msg_id:
-                    if not item.get("readFlag"):
+                    if item.get("readFlag") == CHAT_READ_FLAG_UNREAD and not item.get(ATTR_CHAT_READ_RECEIPT_SENT):
                         newly_marked = True
-                    item["readFlag"] = 1
+                    # Preserve the vendor flag until a fresh Chats response gives us its real
+                    # post-read value; only record that this cached copy has been acknowledged.
+                    item[ATTR_CHAT_READ_RECEIPT_SENT] = True
                 messages.append(item)
             if messages:
                 chats["list"] = messages

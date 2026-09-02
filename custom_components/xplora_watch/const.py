@@ -50,6 +50,12 @@ ATTR_SERVICE_LOGOUT: Final = "logout"
 ATTR_SERVICE_MSG: Final = "message"
 ATTR_SERVICE_MSGID: Final = "message_id"
 ATTR_SERVICE_CHAT_ID: Final = "chat_id"
+# A live Xplora payload whose watch-level unread count was 1 carried readFlag=2 on that sole
+# incoming unread message. This field is not boolean: value 2 is truthy but means unread.
+CHAT_READ_FLAG_UNREAD: Final = 2
+# Local-only acknowledgement on the cached message after the write-only mutation succeeds. We do
+# not invent Xplora's post-read flag value; a later chat fetch replaces this with server data.
+ATTR_CHAT_READ_RECEIPT_SENT: Final = "haReadReceiptSent"
 # `user` is still surfaced as a per-watch state attribute (the account display name); it is no longer
 # a service selector -- services target HA devices (ADR 0003).
 ATTR_SERVICE_USER: Final = "user"
