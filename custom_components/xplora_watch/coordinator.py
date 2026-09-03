@@ -341,6 +341,11 @@ class XploraDataUpdateCoordinator(DataUpdateCoordinator):
         far more than the app's ~3-day window) survives restarts. A missing/corrupt blob is ignored
         -- the history just starts empty and re-accumulates from the next fetch. Only well-formed
         per-watch point lists are kept; a garbage value for one watch is skipped, not fatal.
+
+        Older releases keyed explicit API windows from local noon, so a bucket could contain the
+        selected day's afternoon plus the following morning. Rebuild every bucket from each
+        point's own timestamp on restore. This preserves the points while moving them to their
+        actual calendar day, and also migrates the legacy flat-list shape.
         """
         try:
             blob = await self._history_store.async_load()
@@ -351,22 +356,42 @@ class XploraDataUpdateCoordinator(DataUpdateCoordinator):
             return
         tzinfo = self._history_tzinfo()
         restored: dict[str, dict[str, list[dict[str, Any]]]] = {}
+        rewrite_store = False
         for wuid, value in blob.items():
             if isinstance(value, dict):
-                # Current per-day shape: keep well-formed buckets.
-                restored[wuid] = {
-                    day: [p for p in pts if isinstance(p, dict) and ATTR_HISTORY_TM in p]
-                    for day, pts in value.items()
-                    if isinstance(pts, list)
-                }
+                source_buckets: list[tuple[str | None, Any]] = list(value.items())
             elif isinstance(value, list):
-                # Legacy flat-list shape -> regroup into day buckets by each point's own day.
-                days: dict[str, list[dict[str, Any]]] = {}
-                for p in value:
-                    if isinstance(p, dict) and ATTR_HISTORY_TM in p:
-                        days.setdefault(self._day_key_from_ms(p[ATTR_HISTORY_TM], tzinfo), []).append(p)
-                restored[wuid] = days
+                source_buckets = [(None, value)]
+                rewrite_store = True
+            else:
+                continue
+
+            by_day: dict[str, dict[int, dict[str, Any]]] = {}
+            for stored_day, points in source_buckets:
+                if not isinstance(points, list):
+                    rewrite_store = True
+                    continue
+                for point in points:
+                    if not isinstance(point, dict):
+                        rewrite_store = True
+                        continue
+                    tm = self._to_epoch_ms(point.get(ATTR_HISTORY_TM))
+                    if tm is None:
+                        rewrite_store = True
+                        continue
+                    actual_day = self._day_key_from_ms(tm, tzinfo)
+                    normalized = dict(point)
+                    normalized[ATTR_HISTORY_TM] = tm
+                    bucket = by_day.setdefault(actual_day, {})
+                    if stored_day != actual_day or tm in bucket or normalized != point:
+                        rewrite_store = True
+                    bucket[tm] = normalized
+            restored[wuid] = {
+                day: sorted(points.values(), key=lambda point: point[ATTR_HISTORY_TM]) for day, points in by_day.items()
+            }
         self._loc_history = restored
+        if rewrite_store:
+            await self._persist_loc_history()
         total = sum(len(bucket) for buckets in restored.values() for bucket in buckets.values())
         if total:
             self._log.debug("Restored %d location-history point(s) across %d watch(es)", total, len(restored))
@@ -1323,10 +1348,10 @@ class XploraDataUpdateCoordinator(DataUpdateCoordinator):
 
     @staticmethod
     def _day_key_to_date_param(day_key: str, tzinfo: ZoneInfo | None) -> int | None:
-        """Epoch *seconds* at noon of `day_key` in the watch tz -- the API `date` arg for that day."""
+        """Epoch seconds at local midnight starting ``day_key`` -- Xplora's 24-hour window start."""
         try:
             year, month, day = (int(part) for part in day_key.split("-"))
-            return int(datetime(year, month, day, 12, 0, 0, tzinfo=tzinfo).timestamp())
+            return int(datetime(year, month, day, 0, 0, 0, tzinfo=tzinfo).timestamp())
         except TypeError, ValueError:
             return None
 
@@ -1370,12 +1395,10 @@ class XploraDataUpdateCoordinator(DataUpdateCoordinator):
         cached = self._loc_history.get(wuid, {})
         if not force and day_key != today and day_key in cached:
             return list(cached[day_key])  # immutable past day already cached -> no network
-        # X6SE can return a non-empty but incomplete track for today's `date=None` query (confirmed
-        # by comparing the live cache with a later explicit-day fetch). Use the explicit date for
-        # that model from the outset; other models keep the established `date=None` Today query.
-        model = ((self.controller.getDevice(wuid) or {}).get("getWatches") or {}).get("model")
-        explicit_day = day_key != today or model == "X6SE"
-        date_param = self._day_key_to_date_param(day_key, tzinfo) if explicit_day else None
+        # Live responses show that `date` starts a 24-hour window: passing local noon shifted every
+        # bucket by twelve hours and made Today empty before noon. Use local midnight for every
+        # watch/day so the API window matches the calendar day shown by the card.
+        date_param = self._day_key_to_date_param(day_key, tzinfo)
         try:
             # Routed through the centralized gate so a single expired token is recovered ONCE here
             # at the source (bounded refresh -> retry) instead of surfacing to every caller

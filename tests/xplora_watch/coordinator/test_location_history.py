@@ -77,13 +77,14 @@ async def test_history_not_fetched_when_disabled(hass: HomeAssistant, coordinato
 
 
 async def test_only_today_fetched_on_force_refresh(hass: HomeAssistant, coordinator: XploraDataUpdateCoordinator) -> None:
-    """A force refresh fetches only TODAY (one request, date=None), stored under today's bucket."""
+    """A force refresh fetches only TODAY from local midnight, stored under today's bucket."""
     _register_history_entity(hass, coordinator._entry, disabled=False)
     mock = _patch_loc_history(coordinator)
     data = await coordinator.async_refresh_functions([DEFAULT_WUID])
 
     mock.assert_called_once()
-    assert mock.await_args.kwargs["date"] is None  # today keeps the proven date=None call
+    date_param = mock.await_args.kwargs["date"]
+    assert datetime.fromtimestamp(date_param, coordinator._history_tzinfo()).hour == 0
     buckets = coordinator._loc_history[DEFAULT_WUID]
     assert list(buckets.keys()) == [_today(coordinator)]
     assert len(buckets[_today(coordinator)]) == 2  # two points, tm normalized to ms
@@ -123,7 +124,7 @@ async def test_today_is_always_fetched_fresh(coordinator: XploraDataUpdateCoordi
     await coordinator.async_fetch_history_day(DEFAULT_WUID, today)
     await coordinator.async_fetch_history_day(DEFAULT_WUID, today)
     assert mock.call_count == 2
-    assert all(call.kwargs["date"] is None for call in mock.await_args_list)
+    assert all(call.kwargs["date"] is not None for call in mock.await_args_list)
 
 
 async def test_concurrent_today_reads_share_one_request(coordinator: XploraDataUpdateCoordinator) -> None:
@@ -152,8 +153,8 @@ async def test_concurrent_today_reads_share_one_request(coordinator: XploraDataU
     assert coordinator._inflight_history == {}
 
 
-async def test_x6se_today_uses_one_explicit_date_request(coordinator: XploraDataUpdateCoordinator) -> None:
-    """X6SE avoids the non-empty-but-partial date=None response with one explicit-day request."""
+async def test_today_explicit_date_starts_at_local_midnight(coordinator: XploraDataUpdateCoordinator) -> None:
+    """The explicit Today window starts at 00:00 in the configured watch timezone."""
     coordinator.controller.getDevice = lambda _wuid: {"getWatches": {"model": "X6SE"}}  # type: ignore[method-assign]
     mock = AsyncMock(return_value=make_loc_history_payload())
     coordinator.controller.getWatchLocHistory = mock  # type: ignore[method-assign]
@@ -162,7 +163,10 @@ async def test_x6se_today_uses_one_explicit_date_request(coordinator: XploraData
 
     assert len(points) == 2
     assert mock.await_count == 1
-    assert mock.await_args.kwargs["date"] is not None
+    date_param = mock.await_args.kwargs["date"]
+    requested = datetime.fromtimestamp(date_param, coordinator._history_tzinfo())
+    assert requested.strftime("%Y-%m-%d") == _today(coordinator)
+    assert (requested.hour, requested.minute, requested.second) == (0, 0, 0)
 
 
 async def test_past_day_is_cached_after_first_fetch(coordinator: XploraDataUpdateCoordinator) -> None:
@@ -290,7 +294,8 @@ async def test_history_persists_across_restart(
     """A stored day persists to `.storage`; a fresh coordinator for the same entry restores it."""
     tzinfo = coordinator._history_tzinfo()
     today = _today(coordinator)
-    await coordinator._store_day(DEFAULT_WUID, today, [{"tm": 1700000000000, "lat": 1.0, "lng": 2.0}], tzinfo)
+    today_tm = int(datetime.strptime(today, "%Y-%m-%d").replace(hour=12, tzinfo=tzinfo).timestamp() * 1000)
+    await coordinator._store_day(DEFAULT_WUID, today, [{"tm": today_tm, "lat": 1.0, "lng": 2.0}], tzinfo)
 
     coord2 = XploraDataUpdateCoordinator(hass, coordinator._entry)
     await coord2.init(session=aiohttp_client.async_get_clientsession(hass))
@@ -308,3 +313,29 @@ async def test_restores_legacy_flat_list_shape(
     buckets = coord2._loc_history.get(DEFAULT_WUID, {})
     assert buckets, "legacy flat list should be regrouped into a day bucket"
     assert sum(len(b) for b in buckets.values()) == 1
+
+
+async def test_restore_rebuckets_noon_window_points_by_actual_calendar_day(
+    hass: HomeAssistant, coordinator: XploraDataUpdateCoordinator, hass_storage: dict[str, Any]
+) -> None:
+    """Existing noon-shifted buckets are repaired without dropping their unique points."""
+    tzinfo = coordinator._history_tzinfo()
+    first_tm = int(datetime(2026, 9, 1, 18, 0, tzinfo=tzinfo).timestamp() * 1000)
+    next_morning_tm = int(datetime(2026, 9, 2, 8, 0, tzinfo=tzinfo).timestamp() * 1000)
+    await coordinator._history_store.async_save(
+        {
+            DEFAULT_WUID: {
+                "2026-09-01": [
+                    {"tm": first_tm, "lat": 1.0, "lng": 2.0},
+                    {"tm": next_morning_tm, "lat": 1.1, "lng": 2.1},
+                ]
+            }
+        }
+    )
+
+    coord2 = XploraDataUpdateCoordinator(hass, coordinator._entry)
+    await coord2.init(session=aiohttp_client.async_get_clientsession(hass))
+
+    assert [point["tm"] for point in coord2._loc_history[DEFAULT_WUID]["2026-09-01"]] == [first_tm]
+    assert [point["tm"] for point in coord2._loc_history[DEFAULT_WUID]["2026-09-02"]] == [next_morning_tm]
+    assert sum(len(bucket) for bucket in coord2._loc_history[DEFAULT_WUID].values()) == 2
