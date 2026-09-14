@@ -378,6 +378,7 @@ class XploraOptionsFlowHandler(OptionsFlowWithConfigEntry):
                     ),
                 ),
                 vol.Required(CONF_REMOVE_MESSAGE, default=_options.get(CONF_REMOVE_MESSAGE, False)): BooleanSelector(),
+                vol.Optional("push_notifications", default=_options.get("push_notifications", False)): BooleanSelector(),
                 vol.Required(
                     CONF_REFRESH_ON_CARD_RENDER,
                     default=_options.get(CONF_REFRESH_ON_CARD_RENDER, DEFAULT_REFRESH_ON_CARD_RENDER),

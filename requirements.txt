@@ -4,6 +4,7 @@ pip>=25.3
 
 # Runtime requirements of the vendored xplora_watch integration (custom_components/xplora_watch/manifest.json)
 backoff>=2
+firebase-messaging==0.4.5
 requests>=2
 geopy>=2.4
 dataclasses-json>=0.6

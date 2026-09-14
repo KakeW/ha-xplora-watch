@@ -106,7 +106,8 @@
           "scan_interval": "Intervalle de mise à jour (Désactivé arrête l'interrogation)",
           "scan_interval_functions": "Intervalle de mise à jour des fonctions (alarmes, plages silencieuses, zones sûres)",
           "watches": "Montres",
-          "account_alias": "Alias du compte"
+          "account_alias": "Alias du compte",
+          "push_notifications": "Receive push messages (experimental)"
         },
         "data_description": {
           "history_retention_days": "Durée de conservation des positions passées par le capteur d'historique de position (optionnel). Home Assistant en conserve bien plus que la fenêtre d'environ 3 jours de l'application Xplora®. N'a d'effet qu'une fois le capteur d'historique de position activé.",
@@ -114,7 +115,8 @@
           "scan_interval_functions": "Fréquence à laquelle les alarmes, plages silencieuses et zones sûres (qui changent rarement) sont récupérées. Chacune nécessite une requête distincte par montre, c'est pourquoi elles sont Désactivées par défaut afin de limiter le trafic. Choisissez « À chaque interrogation » pour les actualiser à chaque mise à jour, ou récupérez-les à la demande via le service xplora_watch.refresh_functions ou en touchant les tuiles de comptage sur la carte.",
           "auto_fetch_history": "Lorsque cette option est activée, l'intégration récupère de nouveau à 01:00 l'historique de la veille et le fusionne avec le trajet enregistré. Les positions que Xplora rend disponibles après la fin de la journée sont ainsi ajoutées.",
           "refresh_on_card_render": "Lorsque activé, les cartes personnalisées du tableau de bord demandent des données fraîches dès leur affichage (alarmes et plages silencieuses, position et messages). Désactivé par défaut afin de limiter le trafic ; si plusieurs cartes d'une vue affichent la même montre, chaque jeu de données n'est actualisé qu'une seule fois.",
-          "account_alias": "Renomme l'appareil montre de ce compte au prochain rechargement (par ex. « Dana Watch (Maman) »). Les identifiants d'entités existants conservent leur nom d'origine, afin que les automatisations et tableaux de bord qui les référencent continuent de fonctionner."
+          "account_alias": "Renomme l'appareil montre de ce compte au prochain rechargement (par ex. « Dana Watch (Maman) »). Les identifiants d'entités existants conservent leur nom d'origine, afin que les automatisations et tableaux de bord qui les référencent continuent de fonctionner.",
+          "push_notifications": "Receive new chat events without polling. May replace the Xplora app's push recipient. Configure an HA automation to forward events to your phone."
         },
         "title": "paramètres supplémentaires pour HA Xplora® Watch"
       }

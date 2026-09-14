@@ -17,6 +17,7 @@ one page per feature area.
 
 ## Features
 
+- [Push message notifications](push-notifications.md) — experimental push receiver and phone alerts
 - [Alarms & silent times](alarms-and-silent-times.md) — sensors, services, common automations
 - [Location history](location-history.md) — the history sensor, retention, and daily archiving
 - [Safe zones](safe-zones.md) — the safe-zone sensors and trackers

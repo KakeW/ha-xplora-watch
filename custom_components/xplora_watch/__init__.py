@@ -5,8 +5,8 @@ from __future__ import annotations
 import logging
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.const import CONF_EMAIL, EVENT_HOMEASSISTANT_STOP, Platform
+from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers import aiohttp_client
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import entity_registry as er
@@ -17,6 +17,7 @@ from homeassistant.util import slugify
 from .config import resolve_account_alias
 from .const import ATTR_WATCH, DATA_HASS_CONFIG, DOMAIN, GUARDIAN_ONLY_KEYS
 from .coordinator import XploraDataUpdateCoordinator
+from .demo import is_demo_account
 from .helper import account_token, async_register_frontend_card, create_www_directory
 from .services import async_setup_services, async_unload_services
 from .websocket import async_register_websocket_commands
@@ -103,6 +104,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
+    if entry.options.get("push_notifications", False) and not is_demo_account(entry.data.get(CONF_EMAIL)):
+        from .push import XploraPush
+
+        coordinator.push = XploraPush(hass, coordinator, entry.entry_id)
+        coordinator.push.start()
+
+        async def stop_push(_event: Event) -> None:
+            await coordinator.push.stop()
+
+        entry.async_on_unload(hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, stop_push))
+
     entry.async_on_unload(entry.add_update_listener(options_update_listener))
 
     return True
@@ -120,6 +132,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     async_unload_services(hass)
     if unload_ok:
+        coordinator = hass.data[DOMAIN][entry.entry_id]
+        if coordinator.push is not None:
+            await coordinator.push.stop()
         hass.data[DOMAIN].pop(entry.entry_id)
     return unload_ok
 

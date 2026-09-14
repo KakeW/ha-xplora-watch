@@ -10,6 +10,7 @@
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/distante/ha-xplora-watch/issues",
   "requirements": [
+    "firebase-messaging==0.4.5",
     "backoff>=2",
     "requests>=2",
     "aiohttp>=3.12",
@@ -17,5 +18,5 @@
     "dataclasses-json>=0.6",
     "security>=1.2"
   ],
-  "version": "v1.4.5"
+  "version": "v1.5.0b1"
 }
