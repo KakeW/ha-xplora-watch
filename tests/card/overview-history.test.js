@@ -94,6 +94,17 @@ describe("location history row", () => {
 });
 
 describe("history popup (date bar + calendar popover)", () => {
+  it("has one toolbar with a working close button beside the date controls", async () => {
+    const el = mount(makeHass());
+    el.shadowRoot.querySelector("[data-history]").click();
+    const close = await waitFor(() => el.shadowRoot.querySelector(".hist-bar .popup-close"));
+    expect(el.shadowRoot.querySelector(".popup-bar")).toBeNull();
+    expect(el.shadowRoot.querySelectorAll(".popup-close")).toHaveLength(1);
+    expect(el.shadowRoot.querySelector(".hist-today")).toBeTruthy();
+    close.click();
+    expect(el.shadowRoot.querySelector(".modal-host").hidden).toBe(true);
+  });
+
   it("opens with a date bar showing today; the popover is closed and the day's points are listed", async () => {
     const el = mount(makeHass({ attrPoints: points(3) }));
     el.shadowRoot.querySelector("[data-history]").click();

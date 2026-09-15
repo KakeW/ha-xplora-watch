@@ -1477,6 +1477,13 @@ class CardPopupHost {
       if (opts.fill) card.style.height = "100%";
       this._embedded = card;
       slot.appendChild(card);
+      // Reuse the wired close button in the content toolbar once loading succeeds.
+      // Keep the standalone bar as a fallback for loading/errors or missing targets.
+      const closeTarget = opts.closeTarget && card.querySelector(opts.closeTarget);
+      if (closeTarget) {
+        closeTarget.appendChild(this._modal.querySelector(".popup-close"));
+        this._modal.querySelector(".popup-bar").remove();
+      }
     } catch (e) {
       if (gen === this._openGen && !this._modal.hidden) {
         slot.innerHTML = `<div class="popup-error">Could not open: ${escapeHtml(e && e.message)}</div>`;
@@ -2372,7 +2379,7 @@ class XploraWatchOverviewCard extends HTMLElement {
         // refresh so the sensor's "points kept" count reflects today's track, then open the map-track
         // popup (fill mode); the popup itself pulls each day fresh over the websocket regardless.
         this._refreshFunctions(entity);
-        this._popup.open(() => this._buildHistoryView(entity), { fill: true });
+      this._popup.open(() => this._buildHistoryView(entity), { fill: true, closeTarget: ".hist-bar" });
       });
     });
     this._card.querySelectorAll("[data-map]").forEach((el) => {
@@ -2812,15 +2819,16 @@ class XploraWatchOverviewCard extends HTMLElement {
       /* z-index:1 (vs the map body's z-index:0) keeps the popover painting above Leaflet's panes. */
       .hist-bar { position: relative; z-index: 1; flex: 0 0 auto; display: flex; align-items: center; justify-content: center;
         gap: 4px; padding: 8px; border-bottom: 1px solid var(--divider-color); }
+      .hist-bar .popup-close { flex: 0 0 48px; margin-left: auto; }
       .hist-nav { background: none; border: none; color: var(--primary-text-color); cursor: pointer; padding: 4px;
         display: inline-flex; border-radius: 50%; }
       .hist-nav:hover { background: var(--secondary-background-color); }
       .hist-nav[disabled] { opacity: 0.3; cursor: default; background: none; }
       .hist-date { background: none; border: none; color: var(--primary-text-color); cursor: pointer; font: inherit; font-weight: 600;
-        font-variant-numeric: tabular-nums; padding: 4px 12px; border-radius: 8px; min-width: 120px; text-align: center; }
+        font-variant-numeric: tabular-nums; padding: 4px 6px; border-radius: 8px; min-width: 0; text-align: center; }
       .hist-date:hover { background: var(--secondary-background-color); }
       .hist-today { background: none; border: none; color: var(--primary-color); cursor: pointer; font: inherit; font-weight: 500;
-        padding: 4px 10px; border-radius: 8px; margin-left: 4px; }
+        padding: 4px 6px; border-radius: 8px; margin-left: 4px; }
       .hist-today:hover { background: var(--secondary-background-color); }
       .hist-today[disabled] { color: var(--disabled-text-color, #9e9e9e); cursor: default; background: none; }
       .hist-pop { position: absolute; top: 100%; left: 50%; transform: translateX(-50%); margin-top: 4px;
