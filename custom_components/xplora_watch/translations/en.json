@@ -107,7 +107,7 @@
           "scan_interval_functions": "Functions update interval (alarms, silent times, safe zones)",
           "watches": "Watches",
           "account_alias": "Account alias",
-          "push_notifications": "Receive push messages (experimental)"
+          "push_notifications": "Receive push messages"
         },
         "data_description": {
           "history_retention_days": "How long the optional location-history sensor keeps past positions. Home Assistant retains far more than the Xplora® app's ~3-day window. Only matters once you enable the location-history sensor.",

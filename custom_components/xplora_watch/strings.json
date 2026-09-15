@@ -108,7 +108,7 @@
           "scan_interval": "Update interval (Off disables polling)",
           "scan_interval_functions": "Functions update interval (alarms, silent times, safe zones)",
           "watches": "Watches",
-          "push_notifications": "Receive push messages (experimental)"
+          "push_notifications": "Receive push messages"
         },
         "data_description": {
           "account_alias": "Renames this account's watch device (e.g. “Dana Watch (Mom)”) on the next reload. Existing entity ids keep their original name, so automations and dashboards that reference them keep working.",

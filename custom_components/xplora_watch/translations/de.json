@@ -107,7 +107,7 @@
           "scan_interval_functions": "Aktualisierungsintervall für Funktionen (Alarme, Stille Zeiten, Sicherheitszonen)",
           "watches": "Uhren",
           "account_alias": "Konto-Alias",
-          "push_notifications": "Receive push messages (experimental)"
+          "push_notifications": "Receive push messages"
         },
         "data_description": {
           "history_retention_days": "Wie lange der optionale Standortverlauf-Sensor vergangene Positionen speichert. Home Assistant bewahrt weit mehr auf als das ~3-Tage-Fenster der Xplora®-App. Nur relevant, sobald der Standortverlauf-Sensor aktiviert ist.",

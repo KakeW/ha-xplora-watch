@@ -107,7 +107,7 @@
           "scan_interval_functions": "Intervalle de mise à jour des fonctions (alarmes, plages silencieuses, zones sûres)",
           "watches": "Montres",
           "account_alias": "Alias du compte",
-          "push_notifications": "Receive push messages (experimental)"
+          "push_notifications": "Receive push messages"
         },
         "data_description": {
           "history_retention_days": "Durée de conservation des positions passées par le capteur d'historique de position (optionnel). Home Assistant en conserve bien plus que la fenêtre d'environ 3 jours de l'application Xplora®. N'a d'effet qu'une fois le capteur d'historique de position activé.",

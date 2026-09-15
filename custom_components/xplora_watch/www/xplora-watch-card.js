@@ -1395,13 +1395,18 @@ function escapeHtml(v) {
  * to their content.
  * ------------------------------------------------------------------------------------------- */
 const POPUP_HOST_CSS = `
-  .modal-host { position: fixed; inset: 0; z-index: 9; display: flex; align-items: center; justify-content: center; padding: 16px; box-sizing: border-box; }
+  .modal-host { position: fixed; inset: 0; z-index: 9; display: flex; align-items: center; justify-content: center; padding: 16px; box-sizing: border-box;
+    padding-top: calc(16px + env(safe-area-inset-top, 0px));
+    padding-right: calc(16px + env(safe-area-inset-right, 0px));
+    padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    padding-left: calc(16px + env(safe-area-inset-left, 0px)); }
   .modal-host[hidden] { display: none; }
   .backdrop { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.46); }
   .card-popup { position: relative; z-index: 1; width: 100%; max-width: 480px; max-height: 100%; display: flex; flex-direction: column; }
   .card-popup.fill { max-width: 1000px; height: 100%; }
-  .popup-bar { display: flex; justify-content: flex-end; margin-bottom: 4px; flex: 0 0 auto; }
-  .popup-close { color: #fff; }
+  .popup-bar { display: flex; justify-content: flex-end; flex: 0 0 auto; min-height: 48px; padding: 4px 8px;
+    background: var(--ha-card-background, var(--card-background-color, #fff)); border-radius: 12px 12px 0 0; }
+  .popup-close { color: var(--primary-text-color, #212121); min-width: 48px; min-height: 48px; }
   .popup-slot { overflow: auto; }
   .card-popup.fill .popup-slot { flex: 1; min-height: 0; display: flex; }
   .card-popup.fill .popup-slot > * { flex: 1; min-height: 0; }

@@ -1,13 +1,13 @@
-# Push message notifications (experimental)
+# Push message notifications
 
-Enable **Receive push messages (experimental)** in the integration's options.
+Enable **Receive push messages** in the integration's options.
 Polling can remain off. Each new chat push emits a Home Assistant event named
 `xplora_watch_message`. This does not mark a message read or fetch location.
 
-Text pushes were verified with a real watch on 2026-09-14. The official iOS bundle
-also names `chat_voice`, `chat_emoticon`, `chat_image` and `chat_video`. These
-are accepted when sender and message IDs are present, but voice delivery still
-needs a live test. Media is not downloaded or attached to notifications.
+The user confirmed both text and voice notifications through HA to their iPhone
+on 2026-09-14. The official iOS bundle also names `chat_emoticon`, `chat_image`
+and `chat_video`; these still need live verification. Media is not downloaded
+or attached to notifications.
 
 Create an automation in YAML and replace the notification action with your phone's
 actual action from Developer Tools > Actions:
