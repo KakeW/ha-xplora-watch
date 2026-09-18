@@ -94,11 +94,40 @@ describe("location history row", () => {
 });
 
 describe("history popup (date bar + calendar popover)", () => {
+  it.each([
+    ["xplora-watch-card", ".header-actions", { entity: HIST }],
+    ["xplora-watch-chat-card", ".header-actions", { entity: HIST }],
+    ["xplora-watch-map-card", ".map-banner", { entity: "device_tracker.test" }],
+    ["xplora-watch-actions-card", ".header", { entities: ["button.test"] }],
+  ])("embeds close in %s across header rebuilds", async (tag, selector, config) => {
+    const hass = makeHass();
+    hass.states["device_tracker.test"] = { state: "home", attributes: { latitude: 60, longitude: 24, xplora_role: "tracker" } };
+    hass.entities["device_tracker.test"] = { entity_id: "device_tracker.test", device_id: DEVICE };
+    const el = mount(hass);
+    const card = document.createElement(tag);
+    card.setConfig(config);
+    await el._popup.open(() => card);
+    const root = card.shadowRoot;
+    const close = root.querySelector(`${selector} .popup-close`);
+    expect(close).toBeTruthy();
+    expect(el.shadowRoot.querySelector(".popup-bar").hidden).toBe(true);
+    const target = root.querySelector(selector);
+    const replacement = target.cloneNode(false);
+    target.replaceWith(replacement);
+    await waitFor(() => replacement.contains(close));
+    expect(root.querySelectorAll(".popup-close")).toHaveLength(1);
+    replacement.remove();
+    await waitFor(() => !el.shadowRoot.querySelector(".popup-bar").hidden);
+    close.click();
+    expect(el.shadowRoot.querySelector(".modal-host").hidden).toBe(true);
+    el.remove();
+  });
+
   it("has one toolbar with a working close button beside the date controls", async () => {
     const el = mount(makeHass());
     el.shadowRoot.querySelector("[data-history]").click();
     const close = await waitFor(() => el.shadowRoot.querySelector(".hist-bar .popup-close"));
-    expect(el.shadowRoot.querySelector(".popup-bar")).toBeNull();
+    expect(el.shadowRoot.querySelector(".popup-bar").hidden).toBe(true);
     expect(el.shadowRoot.querySelectorAll(".popup-close")).toHaveLength(1);
     expect(el.shadowRoot.querySelector(".hist-today")).toBeTruthy();
     close.click();

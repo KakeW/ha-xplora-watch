@@ -1443,6 +1443,7 @@ class CardPopupHost {
   async open(builder, opts = {}) {
     const hass = this._getHass();
     if (!hass) return;
+    this._toolbarObserver?.disconnect();
     if (!this._styleInjected) {
       const style = document.createElement("style");
       style.textContent = POPUP_HOST_CSS;
@@ -1479,10 +1480,30 @@ class CardPopupHost {
       slot.appendChild(card);
       // Reuse the wired close button in the content toolbar once loading succeeds.
       // Keep the standalone bar as a fallback for loading/errors or missing targets.
-      const closeTarget = opts.closeTarget && card.querySelector(opts.closeTarget);
-      if (closeTarget) {
-        closeTarget.appendChild(this._modal.querySelector(".popup-close"));
-        this._modal.querySelector(".popup-bar").remove();
+      const selector = opts.closeTarget || {
+        "xplora-watch-card": ".header-actions",
+        "xplora-watch-chat-card": ".header-actions",
+        "xplora-watch-map-card": ".map-banner",
+        "xplora-watch-actions-card": ".header",
+      }[card.localName];
+      if (selector) {
+        const root = card.shadowRoot || card;
+        const close = this._modal.querySelector(".popup-close");
+        const bar = this._modal.querySelector(".popup-bar");
+        // Inline styling survives moving into an embedded card's shadow root.
+        close.style.cssText = "color:var(--primary-text-color,#212121);min-width:48px;min-height:48px;flex:0 0 48px;";
+        const placeClose = () => {
+          const target = root.querySelector(selector);
+          const parent = target || bar;
+          if (close.parentNode !== parent) parent.appendChild(close);
+          bar.hidden = !!target;
+          bar.style.display = target ? "none" : "";
+        };
+        placeClose();
+        // Alarm/map headers are rebuilt on state updates. Reattach the SAME wired
+        // button, and restore the fallback toolbar when no content header exists.
+        this._toolbarObserver = new MutationObserver(placeClose);
+        this._toolbarObserver.observe(root, { childList: true, subtree: true });
       }
     } catch (e) {
       if (gen === this._openGen && !this._modal.hidden) {
@@ -1492,6 +1513,7 @@ class CardPopupHost {
   }
 
   close() {
+    this._toolbarObserver?.disconnect();
     this._openGen++; // abort any in-flight build so it can't mount after we've closed
     window.removeEventListener("keydown", this._onKeyDown);
     this._embedded = null;
@@ -2379,7 +2401,7 @@ class XploraWatchOverviewCard extends HTMLElement {
         // refresh so the sensor's "points kept" count reflects today's track, then open the map-track
         // popup (fill mode); the popup itself pulls each day fresh over the websocket regardless.
         this._refreshFunctions(entity);
-      this._popup.open(() => this._buildHistoryView(entity), { fill: true, closeTarget: ".hist-bar" });
+        this._popup.open(() => this._buildHistoryView(entity), { fill: true, closeTarget: ".hist-bar" });
       });
     });
     this._card.querySelectorAll("[data-map]").forEach((el) => {
