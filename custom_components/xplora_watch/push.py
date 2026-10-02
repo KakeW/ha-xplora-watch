@@ -1,4 +1,5 @@
 """Opt-in FCM receiver. Never acknowledges Xplora chats as read."""
+
 from __future__ import annotations
 
 import asyncio
@@ -34,11 +35,18 @@ def parse_message(payload: Any) -> dict[str, str] | None:
             return None
         if not content.get("sender") or not content.get("msg_id"):
             return None
-        return {key: str(content.get(source, "")) for key, source in {
-            "sender_id": "sender", "sender_name": "sender_name", "message_id": "msg_id",
-            "message_type": "msg_type", "text": "text", "timestamp": "time",
-        }.items()}
-    except (ValueError, TypeError, KeyError, AttributeError):
+        return {
+            key: str(content.get(source, ""))
+            for key, source in {
+                "sender_id": "sender",
+                "sender_name": "sender_name",
+                "message_id": "msg_id",
+                "message_type": "msg_type",
+                "text": "text",
+                "timestamp": "time",
+            }.items()
+        }
+    except ValueError, TypeError, KeyError, AttributeError:
         return None
 
 
@@ -55,6 +63,8 @@ class XploraPush:
         self.task: asyncio.Task | None = None
         self.queue: asyncio.Queue[dict[str, str]] = asyncio.Queue(maxsize=256)
         self.stopping = False
+        self.refresh_tasks: dict[str, asyncio.Task] = {}
+        self.refresh_pending: set[str] = set()
 
     def start(self) -> None:
         """Network startup must not block integration setup."""
@@ -76,7 +86,30 @@ class XploraPush:
             return
         self.state["seen"] = (seen + [key])[-2048:]
         await self.store.async_save(self.state)
+        # Only a configured watch can originate an incoming child message. FCM
+        # also delivers echoes of messages sent by the logged-in parent.
+        wuid = message["sender_id"]
+        if wuid not in self.coordinator._configured_wuids:
+            return
+        self.refresh_pending.add(wuid)
+        if wuid not in self.refresh_tasks:
+            self.refresh_tasks[wuid] = self.hass.async_create_background_task(self.refresh_messages(wuid), f"Xplora messages {wuid}")
         self.hass.bus.async_fire(EVENT_MESSAGE, {"entry_id": self.entry_id, **message})
+
+    async def refresh_messages(self, wuid: str) -> None:
+        """Warm the thread and media cache; coalesce bursts per watch."""
+        from .services import XploraMessageSensorUpdateService
+
+        service = XploraMessageSensorUpdateService(self.hass, self.entry_id)
+        try:
+            while wuid in self.refresh_pending and not self.stopping:
+                self.refresh_pending.discard(wuid)
+                try:
+                    await service.async_prefetch_watch(self.coordinator, wuid)
+                except Exception as err:  # noqa: BLE001 -- optional cache fetch must not stop push delivery
+                    _LOGGER.warning("Xplora message prefetch failed (%s)", type(err).__name__)
+        finally:
+            self.refresh_tasks.pop(wuid, None)
 
     async def run(self) -> None:
         try:
@@ -109,10 +142,14 @@ class XploraPush:
 
     async def connect(self) -> None:
         self.client = FcmPushClient(
-            self.received, FcmRegisterConfig(
-                FIREBASE_CONFIG["project_id"], FIREBASE_CONFIG["app_id"],
-                FIREBASE_CONFIG["api_key"], FIREBASE_CONFIG["messaging_sender_id"],
-            ), self.state.get("credentials"),
+            self.received,
+            FcmRegisterConfig(
+                FIREBASE_CONFIG["project_id"],
+                FIREBASE_CONFIG["app_id"],
+                FIREBASE_CONFIG["api_key"],
+                FIREBASE_CONFIG["messaging_sender_id"],
+            ),
+            self.state.get("credentials"),
             http_client_session=aiohttp_client.async_get_clientsession(self.hass),
         )
         self.fcm_token = await asyncio.wait_for(self.client.checkin_or_register(), 60)
@@ -126,11 +163,18 @@ class XploraPush:
         controller = self.coordinator.controller
         result = await self.coordinator._with_recovery(
             lambda: controller._gql_handler.runAuthorizedGqlQuery_a(
-                FCM_M["setTokenM"], {
-                    "clientId": self.state["client_id"], "fcmToken": self.fcm_token,
-                    "manufacturer": "Home Assistant", "brand": "Home Assistant", "model": "Push receiver",
-                    "osVer": "1", "userLang": "en-GB", "timeZone": self.coordinator._history_tz(),
-                }, "setFCMToken",
+                FCM_M["setTokenM"],
+                {
+                    "clientId": self.state["client_id"],
+                    "fcmToken": self.fcm_token,
+                    "manufacturer": "Home Assistant",
+                    "brand": "Home Assistant",
+                    "model": "Push receiver",
+                    "osVer": "1",
+                    "userLang": "en-GB",
+                    "timeZone": self.coordinator._history_tz(),
+                },
+                "setFCMToken",
             )
         )
         if result.get("errors") or (result.get("data") or {}).get("setFCMToken") is not True:
@@ -146,6 +190,11 @@ class XploraPush:
 
     async def stop(self) -> None:
         self.stopping = True
+        tasks = list(self.refresh_tasks.values())
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        self.refresh_pending.clear()
         if self.task:
             self.task.cancel()
             await asyncio.gather(self.task, return_exceptions=True)

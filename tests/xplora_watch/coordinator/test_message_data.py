@@ -17,7 +17,7 @@ async def test_message_data_returns_raw_chats(coordinator: XploraDataUpdateCoord
 async def test_message_data_leaves_other_wuids_untouched(
     coordinator: XploraDataUpdateCoordinator,
 ) -> None:
-    """message_data() replaces the target wuid's entry with {message: chats} but leaves other wuids untouched."""
+    """Fetching chats preserves status fields and other watches."""
     coordinator.data = {
         DEFAULT_WUID: {"battery": 80, "isOnline": True},
         "other-wuid": {"battery": 50},
@@ -26,4 +26,4 @@ async def test_message_data_leaves_other_wuids_untouched(
     await coordinator.message_data(DEFAULT_WUID, message_limit=10, remove_message=False)
 
     assert coordinator.data["other-wuid"] == {"battery": 50}
-    assert coordinator.data[DEFAULT_WUID] == {SENSOR_MESSAGE: {"list": []}}
+    assert coordinator.data[DEFAULT_WUID] == {"battery": 80, "isOnline": True, SENSOR_MESSAGE: {"list": []}}

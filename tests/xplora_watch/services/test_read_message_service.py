@@ -21,6 +21,26 @@ from tests.xplora_watch.fixtures.graphql_payloads import DEFAULT_USER_ID, DEFAUL
 from ..conftest import setup_service_target
 
 
+async def test_push_prefetch_publishes_thread_before_media_and_does_not_mark_read(hass, coordinator):
+    service = XploraMessageSensorUpdateService(hass, "test")
+    order = []
+
+    async def media(*_args):
+        order.append("media")
+
+    with (
+        patch.object(
+            coordinator.controller, "getWatchChatsRaw", new_callable=AsyncMock, return_value={"list": [_make_raw_chat("123", "VOICE")]}
+        ) as fetch,
+        patch.object(coordinator, "async_update_listeners", side_effect=lambda: order.append("published")),
+        patch.object(service, "_fetch_chat_voice", side_effect=media),
+    ):
+        await service.async_prefetch_watch(coordinator, DEFAULT_WUID)
+    assert order == ["published", "media"]
+    assert fetch.call_args.kwargs["mark_as_read"] is False
+    assert coordinator.data[DEFAULT_WUID][SENSOR_MESSAGE]["list"][0]["readFlag"] == 2
+
+
 def _make_raw_chat(msg_id: str, chat_type: str) -> dict:
     """Build a raw chat dict matching SimpleChat's expected JSON shape (see model.py)."""
     return {
@@ -122,9 +142,7 @@ async def test_explicit_mark_read_updates_message_and_unread_count_immediately(
 ) -> None:
     """A confirmed per-message receipt is mirrored locally without waiting for the next poll."""
     devices = await setup_service_target(hass, coordinator_with_data)
-    coordinator_with_data.data[DEFAULT_WUID][SENSOR_MESSAGE] = {
-        "list": [_make_raw_chat("msg-0", "TEXT"), _make_raw_chat("msg-1", "VOICE")]
-    }
+    coordinator_with_data.data[DEFAULT_WUID][SENSOR_MESSAGE] = {"list": [_make_raw_chat("msg-0", "TEXT"), _make_raw_chat("msg-1", "VOICE")]}
     coordinator_with_data.data[DEFAULT_WUID]["unreadMsg"] = 2
 
     with patch.object(
@@ -151,9 +169,7 @@ async def test_concurrent_receipts_do_not_lose_unread_count_decrements(
     coordinator_with_data: XploraDataUpdateCoordinator,
 ) -> None:
     """Two cards acknowledging different bubbles at once are serialized by the coordinator."""
-    coordinator_with_data.data[DEFAULT_WUID][SENSOR_MESSAGE] = {
-        "list": [_make_raw_chat("msg-0", "TEXT"), _make_raw_chat("msg-1", "TEXT")]
-    }
+    coordinator_with_data.data[DEFAULT_WUID][SENSOR_MESSAGE] = {"list": [_make_raw_chat("msg-0", "TEXT"), _make_raw_chat("msg-1", "TEXT")]}
     coordinator_with_data.data[DEFAULT_WUID]["unreadMsg"] = 2
 
     with patch.object(

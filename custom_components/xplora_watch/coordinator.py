@@ -387,9 +387,7 @@ class XploraDataUpdateCoordinator(DataUpdateCoordinator):
                     if stored_day != actual_day or tm in bucket or normalized != point:
                         rewrite_store = True
                     bucket[tm] = normalized
-            restored[wuid] = {
-                day: sorted(points.values(), key=lambda point: point[ATTR_HISTORY_TM]) for day, points in by_day.items()
-            }
+            restored[wuid] = {day: sorted(points.values(), key=lambda point: point[ATTR_HISTORY_TM]) for day, points in by_day.items()}
         self._loc_history = restored
         if rewrite_store:
             await self._persist_loc_history()
@@ -643,9 +641,7 @@ class XploraDataUpdateCoordinator(DataUpdateCoordinator):
         self._update_is_admin(wuids)
 
         opts = self._resolved
-        return await self.data_loop(
-            wuids, opts.message, opts.remove_message, include_chats=include_chats, include_history=include_history
-        )
+        return await self.data_loop(wuids, opts.message, opts.remove_message, include_chats=include_chats, include_history=include_history)
 
     async def async_update_xplora_data(
         self, targets: list[str] | None = None, new_data: dict | None = None, force_functions: bool = False
@@ -1583,18 +1579,19 @@ class XploraDataUpdateCoordinator(DataUpdateCoordinator):
 
     async def message_data(self, wuid: str, message_limit: int, remove_message: bool) -> dict[str, Any]:
         """Fetch message chats from Xplora."""
-        watch_entry = {}
-        if self.data:
-            watch_entry.update(self.data)
         self._log.debug("Fetch message data from Xplora: %s", wuid[25:])
-        res_chats = await self.controller.getWatchChatsRaw(
-            wuid, limit=message_limit, show_del_msg=remove_message, mark_as_read=False
-        )
+        res_chats = await self.controller.getWatchChatsRaw(wuid, limit=message_limit, show_del_msg=remove_message, mark_as_read=False)
         if isinstance(res_chats, ChatsNew):
             res_chats = res_chats.to_dict()
         chats = ChatsNew.from_dict(res_chats).to_dict()
-        watch_entry.update({wuid: {SENSOR_MESSAGE: chats}})
-        self.data = watch_entry
+        # Merge after the network request, preserving location/status and changes
+        # made by other watches while this request was in flight.
+        async with self._update_lock:
+            watch_entry = dict(self.data or {})
+            watch_data = dict(watch_entry.get(wuid) or {})
+            watch_data[SENSOR_MESSAGE] = chats
+            watch_entry[wuid] = watch_data
+            self.data = watch_entry
         return res_chats
 
     async def async_mark_chat_message_read(self, wuid: str, msg_id: str, chat_id: str) -> bool:

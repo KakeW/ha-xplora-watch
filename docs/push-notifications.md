@@ -1,13 +1,20 @@
 # Push message notifications
 
 Enable **Receive push messages** in the integration's options.
-Polling can remain off. Each new chat push emits a Home Assistant event named
-`xplora_watch_message`. This does not mark a message read or fetch location.
+Polling can remain off. Each new chat push from a configured watch emits a Home
+Assistant event named `xplora_watch_message`. Echoes of messages sent by a parent
+do not emit this incoming-message event.
+
+An incoming push also starts a background fetch of that watch's chat thread and
+media, so the card can use the cached messages when opened. Thread contents are
+published before media downloads finish. Notifications do not wait for this fetch;
+opening the card immediately can still precede its completion. Fetching does not
+mark messages read or fetch location.
 
 The user confirmed both text and voice notifications through HA to their iPhone
 on 2026-09-14. The official iOS bundle also names `chat_emoticon`, `chat_image`
-and `chat_video`; these still need live verification. Media is not downloaded
-or attached to notifications.
+and `chat_video`; these still need live verification. Media is cached for the chat
+card but is not attached to notifications.
 
 Create an automation in YAML and replace the notification action with your phone's
 actual action from Developer Tools > Actions:

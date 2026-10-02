@@ -871,6 +871,20 @@ class XploraMessageService(XploraService):
 class XploraMessageSensorUpdateService(XploraService):
     """Create a service that can be used to read messages from Watch."""
 
+    async def async_prefetch_watch(self, coordinator: XploraDataUpdateCoordinator, watch: str) -> None:
+        """Publish a push-triggered thread before downloading its media; never mark read."""
+        resolved = resolve(coordinator._entry.options)
+        chats = await coordinator._with_recovery(lambda: coordinator.message_data(watch, resolved.message, resolved.remove_message))
+        coordinator.async_update_listeners()
+        for chat in chats.get("list") or []:
+            fetch = {
+                "VOICE": self._fetch_chat_voice,
+                "SHORT_VIDEO": self._fetch_chat_short_video,
+                "IMAGE": self._fetch_chat_image,
+            }.get(chat.get("type"))
+            if fetch:
+                await fetch(coordinator, watch, chat.get("msgId"))
+
     async def async_read_message(self, **kwargs: Any) -> None:
         """Read the messages from account."""
         data = kwargs["kwargs"]
