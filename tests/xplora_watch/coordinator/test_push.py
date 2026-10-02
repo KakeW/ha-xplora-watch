@@ -38,6 +38,30 @@ async def test_parent_echo_does_not_notify_or_fetch(hass, coordinator, prefetch)
     prefetch.assert_not_awaited()
 
 
+async def test_unknown_push_id_still_notifies_and_prefetches_configured_watches(hass, coordinator, prefetch):
+    receiver = XploraPush(hass, coordinator, "test")
+    events = []
+    hass.bus.async_listen(EVENT_MESSAGE, lambda event: events.append(event.data))
+    await receiver.consume(parse_message(payload(sender="push-id-not-a-watch-uid")))
+    await asyncio.gather(*receiver.refresh_tasks.values())
+    await hass.async_block_till_done()
+    assert len(events) == 1
+    assert events[0]["sender_id"] == "push-id-not-a-watch-uid"
+    assert {call.args[1] for call in prefetch.await_args_list} == {"watch-test", "other"}
+    await receiver.stop()
+
+
+async def test_parent_user_id_alias_is_suppressed(hass, coordinator, prefetch):
+    coordinator.controller.user["userId"] = "parent-push-alias"
+    receiver = XploraPush(hass, coordinator, "test")
+    events = []
+    hass.bus.async_listen(EVENT_MESSAGE, lambda event: events.append(event.data))
+    await receiver.consume(parse_message(payload(sender="parent-push-alias")))
+    await hass.async_block_till_done()
+    assert events == []
+    prefetch.assert_not_awaited()
+
+
 async def test_burst_serializes_and_fetches_again_for_new_push(hass, coordinator, prefetch):
     entered, release = asyncio.Event(), asyncio.Event()
 

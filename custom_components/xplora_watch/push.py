@@ -86,14 +86,21 @@ class XploraPush:
             return
         self.state["seen"] = (seen + [key])[-2048:]
         await self.store.async_save(self.state)
-        # Only a configured watch can originate an incoming child message. FCM
-        # also delivers echoes of messages sent by the logged-in parent.
-        wuid = message["sender_id"]
-        if wuid not in self.coordinator._configured_wuids:
+        # Push sender ids need not be watch UIDs. Suppress only positively
+        # identified parent echoes; an unknown id must not drop a child alert.
+        sender = message["sender_id"]
+        user = self.coordinator.controller.user
+        parent_ids = {str(value) for value in (self.coordinator.user_id, user.get("id"), user.get("userId")) if value}
+        if sender in parent_ids:
             return
-        self.refresh_pending.add(wuid)
-        if wuid not in self.refresh_tasks:
-            self.refresh_tasks[wuid] = self.hass.async_create_background_task(self.refresh_messages(wuid), f"Xplora messages {wuid}")
+        watches = self.coordinator._configured_wuids
+        targets = [sender] if sender in watches else watches
+        if sender not in watches:
+            _LOGGER.debug("Push sender has no direct watch UID match; refreshing %d configured watch(es)", len(targets))
+        for wuid in targets:
+            self.refresh_pending.add(wuid)
+            if wuid not in self.refresh_tasks:
+                self.refresh_tasks[wuid] = self.hass.async_create_background_task(self.refresh_messages(wuid), f"Xplora messages {wuid}")
         self.hass.bus.async_fire(EVENT_MESSAGE, {"entry_id": self.entry_id, **message})
 
     async def refresh_messages(self, wuid: str) -> None:

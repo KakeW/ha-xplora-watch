@@ -1,12 +1,14 @@
 # Push message notifications
 
 Enable **Receive push messages** in the integration's options.
-Polling can remain off. Each new chat push from a configured watch emits a Home
-Assistant event named `xplora_watch_message`. Echoes of messages sent by a parent
-do not emit this incoming-message event.
+Polling can remain off. Each new chat push emits a Home Assistant event named
+`xplora_watch_message`, except when its sender matches the logged-in parent's
+known account identifiers. An unknown push sender is still delivered, because
+push identifiers do not necessarily match watch UIDs.
 
 An incoming push also starts a background fetch of that watch's chat thread and
-media, so the card can use the cached messages when opened. Thread contents are
+media (or all selected watches if its sender cannot be mapped directly), so the
+card can use the cached messages when opened. Thread contents are
 published before media downloads finish. Notifications do not wait for this fetch;
 opening the card immediately can still precede its completion. Fetching does not
 mark messages read or fetch location.
