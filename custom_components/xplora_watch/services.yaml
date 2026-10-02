@@ -226,7 +226,7 @@ see:
       selector: *id001
   name: Track Watch
 send_message:
-  description: Send a notification.
+  description: Send text or a native Xplora emoticon. Specify either message or emoticon_id.
   fields:
     device_id:
       description: The Xplora® watch(es) this action applies to.
@@ -236,7 +236,12 @@ send_message:
     message:
       description: Notification text of the message.
       name: Message
-      required: true
+      required: false
+      selector:
+        text: null
+    emoticon_id:
+      description: Native Xplora emoticon code, for example M1014 (thumbs up). Use instead of message.
+      name: Xplora emoticon
       selector:
         text: null
   name: Send Message

@@ -79,7 +79,7 @@ from .log import Log
 from .pyxplora_api.exception_classes import AuthError, RateLimitError
 from .pyxplora_api.exception_classes import ConnectionError as XploraConnectionError
 from .pyxplora_api.pyxplora_api_async import FetchError
-from .pyxplora_api.status import NormalStatus
+from .pyxplora_api.status import ChatEmoticonType, NormalStatus
 
 # Per-account gating action phrases, shared by every Guardian-only control service. They fill the
 # `not_guardian` error's `{action}` placeholder and the per-watch "skipped: contact" warning.
@@ -120,7 +120,15 @@ BASE_MARK_MESSAGE_READ_SERVICE_SCHEMA = _target_schema(
         vol.Required(ATTR_SERVICE_CHAT_ID): cv.string,
     }
 )
-BASE_SEND_MESSAGE_SERVICE_SCHEMA = _target_schema({vol.Required(ATTR_SERVICE_MSG): cv.string})
+BASE_SEND_MESSAGE_SERVICE_SCHEMA = vol.All(
+    _target_schema(
+        {
+            vol.Exclusive(ATTR_SERVICE_MSG, "chat_content"): cv.string,
+            vol.Exclusive("emoticon_id", "chat_content"): vol.In([item.value for item in ChatEmoticonType if item.name != "UNKNOWN__"]),
+        }
+    ),
+    cv.has_at_least_one_key(ATTR_SERVICE_MSG, "emoticon_id"),
+)
 BASE_SEE_SERVICE_SCHEMA = _target_schema()
 # On-demand refresh of alarms/silent-times/safe-zones (the "functions" data that has its own,
 # default-off poll interval).
@@ -847,8 +855,9 @@ class XploraMessageService(XploraService):
     async def async_send_message(self, **kwargs: Any) -> None:
         """Send message to Watch."""
         data = kwargs["kwargs"]
-        msg = str(data[ATTR_SERVICE_MSG]).strip()
-        if not msg:
+        emoticon_id = data.get("emoticon_id")
+        msg = str(data.get(ATTR_SERVICE_MSG, "")).strip()
+        if not msg and not emoticon_id:
             Log(entry_id=self._entry_id).warning("Message is empty!")
             return
 
@@ -859,7 +868,11 @@ class XploraMessageService(XploraService):
                 result = await account.call(
                     "Send message",
                     watch_id,
-                    lambda wid=watch_id: coordinator.controller.sendText(text=msg, wuid=wid),
+                    lambda wid=watch_id: (
+                        coordinator.controller.sendEmoticon(emoticon_id=emoticon_id, wuid=wid)
+                        if emoticon_id
+                        else coordinator.controller.sendText(text=msg, wuid=wid)
+                    ),
                 )
                 if result is False:
                     account.log.error("Message cannot send!")

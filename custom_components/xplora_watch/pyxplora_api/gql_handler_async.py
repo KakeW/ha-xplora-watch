@@ -509,6 +509,20 @@ class GQLHandler(HandlerGQL):
             return True
         return False
 
+    async def sendEmoticon_a(self, wuid: str, emoticon_id: str) -> bool:
+        result = await self.runAuthorizedGqlQuery_a(
+            gm.WATCH_M["sendChatEmoticonM"], {"uid": wuid, "emoticonId": emoticon_id}, "SendChatEmoticon"
+        )
+        data = result.get("data") or {}
+        if result.get("errors") or "sendChatEmoticon" not in data:
+            raise XploraProtocolError("Invalid SendChatEmoticon response")
+        value = data["sendChatEmoticon"]
+        if value is None or value is False:
+            return False
+        if value is True or (isinstance(value, str) and value):
+            return True
+        raise XploraProtocolError("Unexpected SendChatEmoticon acknowledgement")
+
     async def addStep_a(self, stepCount: int) -> dict[str, Any]:
         return (await self.runAuthorizedGqlQuery_a(gm.STEP_M.get("addM", ""), {"stepCount": stepCount}, "AddStep")).get("data", {})
 

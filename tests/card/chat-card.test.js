@@ -7,6 +7,23 @@ beforeAll(async () => {
 });
 
 describe("setConfig", () => {
+  it("sends a picked Xplora emoji as an emoticon and preserves the typed draft", async () => {
+    const calls = [];
+    const el = mountChat([], { callService: async (...args) => { calls.push(args); } });
+    const input = el.shadowRoot.querySelector(".msg-input");
+    input.value = "draft";
+    el.shadowRoot.querySelector(".emoji-btn").click();
+    expect(el.shadowRoot.querySelector(".emoji-picker").hidden).toBe(false);
+    el.shadowRoot.querySelector('[data-emoticon="M1014"]').click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(calls).toContainEqual(["xplora_watch", "send_message", { entity_id: ["sensor.watch_message"], emoticon_id: "M1014" }, undefined, false]);
+    expect(input.value).toBe("draft");
+    expect(el.shadowRoot.querySelector(".emoji-picker").hidden).toBe(true);
+    expect(el.shadowRoot.querySelector(".bubble-emoji").textContent).toBe("👍");
+    el.hass = makeHass([chat("server-emoji", { sender: "acct1", type: "EMOTICON", emoticonId: "👍" })], { lastUpdated: "2026-06-27T11:00:00Z" });
+    expect(el.shadowRoot.querySelectorAll(".bubble-emoji")).toHaveLength(1);
+  });
+
   it("throws without an entity", () => {
     const el = document.createElement("xplora-watch-chat-card");
     expect(() => el.setConfig({})).toThrow(/entity/);

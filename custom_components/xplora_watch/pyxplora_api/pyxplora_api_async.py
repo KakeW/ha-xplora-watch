@@ -899,6 +899,10 @@ class PyXploraApi(PyXplora):
         # sender is login User
         return await self._gql_handler.sendText_a(wuid, text)
 
+    async def sendEmoticon(self, emoticon_id: str, wuid: str) -> bool:
+        """Send a native watch emoticon rather than Unicode text."""
+        return await self._gql_handler.sendEmoticon_a(wuid, emoticon_id)
+
     async def isAdmin(self, wuid: str) -> bool:
         """Whether the logged-in user is the watch's primary (`FIRST`) guardian.
 

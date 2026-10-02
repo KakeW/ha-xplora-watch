@@ -3587,10 +3587,11 @@ class XploraWatchChatCard extends HTMLElement {
   _reconcilePending(list) {
     if (!this._pending.length) return;
     const now = Date.now();
-    const realOutgoing = list.filter((m) => !this._incoming(m)).map((m) => this._text(m).trim());
+    const fingerprint = (m) => m.type === "EMOTICON" ? `emoji:${this._emojiGlyph(m) || this._emojiCode(m)}` : `text:${this._text(m).trim()}`;
+    const realOutgoing = list.filter((m) => !this._incoming(m)).map(fingerprint);
     this._pending = this._pending.filter((p) => {
       if (now - p.create > PENDING_SEND_TTL_MS) return false;
-      const i = realOutgoing.indexOf(((p.data && p.data.text) || "").trim());
+      const i = realOutgoing.indexOf(fingerprint(p));
       if (i >= 0) {
         realOutgoing.splice(i, 1); // consume one match so identical re-sends aren't both dropped
         return false;
@@ -3731,10 +3732,12 @@ class XploraWatchChatCard extends HTMLElement {
     }
   }
 
-  async _send() {
+  async _send(emoticonId = null) {
     if (!this._hass || this._busy) return;
     const input = this._composer && this._composer.querySelector(".msg-input");
-    const text = input ? input.value.trim() : "";
+    const glyph = emoticonId && EMOJI_MAP[emoticonId];
+    if (emoticonId && !glyph) return;
+    const text = glyph || (input ? input.value.trim() : "");
     if (!text) return;
     const a = this._attrs();
     if (!a.wuid || !a.entry_id) {
@@ -3744,17 +3747,19 @@ class XploraWatchChatCard extends HTMLElement {
     this._busy = true;
     this._syncControls();
     try {
-      await this._hass.callService(DOMAIN, CHAT_SERVICE.SEND, { ...this._base(), message: text }, undefined, false);
-      if (input) input.value = "";
+      await this._hass.callService(DOMAIN, CHAT_SERVICE.SEND,
+        { ...this._base(), ...(emoticonId ? { emoticon_id: emoticonId } : { message: text }) }, undefined, false);
+      if (input && !emoticonId) input.value = "";
+      if (this._emojiPicker) this._emojiPicker.hidden = true;
       // Optimistically show the sent message immediately. The follow-up refresh below usually runs
       // before the Xplora backend has indexed the message, so a fetched list wouldn't contain it
       // yet -- without this the message would vanish until a much later poll. The reconcile in
       // `_messages()` drops this placeholder once the real one comes back.
       this._pending.push({
         msgId: `local-${++this._localSeq}`,
-        type: "TEXT",
+        type: emoticonId ? "EMOTICON" : "TEXT",
         sender: { id: a.account_user_id },
-        data: { text },
+        data: emoticonId ? { text: "", emoticon_id: glyph, emoji_id: emoticonId.slice(1) } : { text },
         create: Date.now(),
       });
       this._busy = false;
@@ -4073,13 +4078,26 @@ class XploraWatchChatCard extends HTMLElement {
     });
     this._card.appendChild(this._listEl);
 
+    this._emojiPicker = document.createElement("div");
+    this._emojiPicker.className = "emoji-picker";
+    this._emojiPicker.hidden = true;
+    this._emojiPicker.innerHTML = `<div class="emoji-hint">${this._locale().startsWith("fi") ? "Valitse hymiö lähettääksesi" : "Choose an emoji to send"}</div>` +
+      Object.entries(EMOJI_MAP).map(([id, glyph]) => `<button type="button" data-emoticon="${id}" aria-label="${glyph}">${glyph}</button>`).join("");
+    this._emojiPicker.querySelectorAll("[data-emoticon]").forEach((button) =>
+      button.addEventListener("click", () => this._send(button.dataset.emoticon)));
+    this._card.appendChild(this._emojiPicker);
+
     // Composer (built once so typing survives background re-renders).
     this._composer = document.createElement("div");
     this._composer.className = "composer";
     this._composer.innerHTML = `
+      <ha-icon-button class="emoji-btn" label="Xplora emojis"><ha-icon icon="mdi:emoticon-outline"></ha-icon></ha-icon-button>
       <textarea class="msg-input" rows="1" placeholder="Type a message…" autocomplete="off"></textarea>
       <ha-icon-button class="send-btn" label="Send"><ha-icon icon="mdi:send"></ha-icon></ha-icon-button>`;
     const input = this._composer.querySelector(".msg-input");
+    this._composer.querySelector(".emoji-btn").addEventListener("click", () => {
+      this._emojiPicker.hidden = !this._emojiPicker.hidden;
+    });
     // Enter sends; Shift+Enter inserts a newline. Auto-grow up to a few rows.
     input.addEventListener("keydown", (ev) => {
       if (ev.key === "Enter" && !ev.shiftKey) {
@@ -4192,6 +4210,8 @@ class XploraWatchChatCard extends HTMLElement {
       const input = this._composer.querySelector(".msg-input");
       const send = this._composer.querySelector(".send-btn");
       if (send) send.disabled = this._busy || !input || !input.value.trim();
+      this._composer.querySelector(".emoji-btn").disabled = this._busy;
+      this._emojiPicker.querySelectorAll("button").forEach((button) => { button.disabled = this._busy; });
     }
   }
 
@@ -4475,6 +4495,11 @@ class XploraWatchChatCard extends HTMLElement {
       .empty-title { font-size: 1.05rem; font-weight: 500; color: var(--primary-text-color); }
 
       /* ---- composer ---- */
+      .emoji-picker { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; padding: 8px 12px; flex: 0 0 auto; }
+      .emoji-picker[hidden] { display: none; }
+      .emoji-hint { grid-column: 1 / -1; font-size: 0.8rem; color: var(--secondary-text-color); }
+      .emoji-picker button { min-height: 44px; font-size: 1.6rem; border: 0; border-radius: 8px; background: var(--secondary-background-color); cursor: pointer; }
+      .emoji-btn { color: var(--primary-color); flex: 0 0 auto; }
       .composer { display: flex; align-items: flex-end; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--divider-color); flex: 0 0 auto; }
       .msg-input {
         flex: 1; resize: none; font: inherit; font-size: 0.95rem; line-height: 1.35;

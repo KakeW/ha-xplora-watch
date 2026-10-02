@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import logging
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
+import voluptuous as vol
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ServiceValidationError
 
@@ -16,6 +17,45 @@ from custom_components.xplora_watch.pyxplora_api.exception_classes import RateLi
 from tests.xplora_watch.fixtures.graphql_payloads import DEFAULT_WUID
 
 from ..conftest import setup_service_target
+
+
+@pytest.mark.parametrize("data", [{}, {"emoticon_id": "UNKNOWN__"}, {"emoticon_id": "👍"}, {"message": "hi", "emoticon_id": "M1014"}])
+def test_send_content_validation(data):
+    from custom_components.xplora_watch.services import BASE_SEND_MESSAGE_SERVICE_SCHEMA
+
+    with pytest.raises(vol.Invalid):
+        BASE_SEND_MESSAGE_SERVICE_SCHEMA(data)
+
+
+async def test_send_native_emoticon_uses_enum_not_unicode_text(hass, coordinator):
+    devices = await setup_service_target(hass, coordinator)
+    with patch.object(
+        coordinator.controller._gql_handler,
+        "runAuthorizedGqlQuery_a",
+        new_callable=AsyncMock,
+        return_value={"data": {"sendChatEmoticon": "chat-id"}},
+    ) as request:
+        await hass.services.async_call(
+            DOMAIN, ATTR_SERVICE_SEND_MSG, {"device_id": [devices[DEFAULT_WUID]], "emoticon_id": "M1014"}, blocking=True
+        )
+    assert request.call_args.args[1] == {"uid": DEFAULT_WUID, "emoticonId": "M1014"}
+    assert request.call_args.args[2] == "SendChatEmoticon"
+
+
+async def test_native_emoticon_rejection_surfaces_failure(hass, coordinator):
+    devices = await setup_service_target(hass, coordinator)
+    with (
+        patch.object(
+            coordinator.controller._gql_handler,
+            "runAuthorizedGqlQuery_a",
+            new_callable=AsyncMock,
+            return_value={"data": {"sendChatEmoticon": False}},
+        ),
+        pytest.raises(ServiceValidationError),
+    ):
+        await hass.services.async_call(
+            DOMAIN, ATTR_SERVICE_SEND_MSG, {"device_id": [devices[DEFAULT_WUID]], "emoticon_id": "M1014"}, blocking=True
+        )
 
 
 async def _send(hass: HomeAssistant, device_id: str, message: str) -> None:
