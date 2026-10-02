@@ -60,6 +60,18 @@ describe("rendering", () => {
 });
 
 describe("read receipts", () => {
+  it("highlights only unread incoming messages and updates reused bubbles after a receipt", () => {
+    const incoming = chat("new", { text: "hello" });
+    const el = mountChat([incoming, chat("out", { sender: "acct1", text: "sent" }), chat("read", { readFlag: 1 })], { locale: "fi" });
+    const row = el.shadowRoot.querySelector('[data-key="new"]');
+    expect(el.shadowRoot.querySelectorAll(".bubble-row.unread")).toHaveLength(1);
+    expect(row.querySelector(".bubble-unread").textContent).toBe("Lukematon");
+    el.hass = makeHass([{ ...incoming, haReadReceiptSent: true }], { locale: "fi", lastUpdated: "2026-06-27T11:00:00Z" });
+    expect(el.shadowRoot.querySelector('[data-key="new"]')).toBe(row);
+    expect(row.classList.contains("unread")).toBe(false);
+    expect(row.querySelector(".bubble-unread").hidden).toBe(true);
+  });
+
   it("does not mark a message merely because chat data was fetched/rendered", async () => {
     const calls = [];
     mountChat([chat("m1", { text: "hello" })], { callService: async (...args) => calls.push(args) });

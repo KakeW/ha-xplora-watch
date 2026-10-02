@@ -3854,6 +3854,19 @@ class XploraWatchChatCard extends HTMLElement {
         node = this._bubbleNode(msg);
         appended = true;
       }
+      node._xploraReadMessage = msg;
+      const unread = this._isUnreadIncoming(msg);
+      node.classList.toggle("unread", unread);
+      let badge = node.querySelector(".bubble-unread");
+      if (unread && !badge) {
+        badge = document.createElement("div");
+        badge.className = "bubble-unread";
+        node.querySelector(".bubble").prepend(badge);
+      }
+      if (badge) {
+        badge.textContent = this._locale().startsWith("fi") ? "Lukematon" : "Unread";
+        badge.hidden = !unread;
+      }
       const want = cursor ? cursor.nextSibling : el.firstChild;
       if (node !== want) el.insertBefore(node, want);
       cursor = node;
@@ -3957,7 +3970,7 @@ class XploraWatchChatCard extends HTMLElement {
     const type = String(msg.type || "").toUpperCase();
     if (type === "VOICE" || type === "SHORT_VIDEO") {
       const media = node.querySelector(type === "VOICE" ? ".media-audio" : ".media-video");
-      if (media) media.addEventListener("ended", () => this._markMessageRead(msg), { once: true });
+      if (media) media.addEventListener("ended", () => this._markMessageRead(node._xploraReadMessage));
       return;
     }
     this._ensureReadObserver();
@@ -4379,6 +4392,9 @@ class XploraWatchChatCard extends HTMLElement {
         border-bottom-right-radius: 4px;
       }
       .bubble-name { font-size: 0.78rem; font-weight: 600; opacity: 0.85; margin-bottom: 2px; }
+      .bubble-row.unread .bubble.in { box-shadow: inset 3px 0 0 var(--primary-color); }
+      .bubble-unread { color: var(--primary-color); font-size: 0.75rem; font-weight: 700; margin-bottom: 4px; }
+      .bubble-unread[hidden] { display: none; }
       .bubble-text { white-space: pre-wrap; }
       .bubble-time { font-size: 0.7rem; opacity: 0.7; margin-top: 4px; text-align: right; }
 
