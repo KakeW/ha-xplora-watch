@@ -21,6 +21,19 @@ from tests.xplora_watch.fixtures.graphql_payloads import DEFAULT_USER_ID, DEFAUL
 from ..conftest import setup_service_target
 
 
+async def test_prefetch_updates_unread_before_poll_and_preserves_receipts(hass, coordinator):
+    coordinator.data = {DEFAULT_WUID: {"unreadMsg": 0}}
+    raw = {"list": [_make_raw_chat("123", "EMOTICON")]}
+    with patch.object(coordinator.controller, "getWatchChatsRaw", new_callable=AsyncMock, return_value=raw):
+        await coordinator.message_data(DEFAULT_WUID, 10, False)
+        assert coordinator.data[DEFAULT_WUID]["unreadMsg"] == 1
+        coordinator.data[DEFAULT_WUID][SENSOR_MESSAGE]["list"][0]["haReadReceiptSent"] = True
+        coordinator.data[DEFAULT_WUID]["unreadMsg"] = 0
+        await coordinator.message_data(DEFAULT_WUID, 10, False)
+        assert coordinator.data[DEFAULT_WUID]["unreadMsg"] == 0
+        assert coordinator.data[DEFAULT_WUID][SENSOR_MESSAGE]["list"][0]["haReadReceiptSent"] is True
+
+
 async def test_push_prefetch_publishes_thread_before_media_and_does_not_mark_read(hass, coordinator):
     service = XploraMessageSensorUpdateService(hass, "test")
     order = []

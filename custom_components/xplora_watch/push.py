@@ -13,6 +13,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import aiohttp_client
 from homeassistant.helpers.storage import Store
 
+from .config import resolve
 from .const import DOMAIN
 from .coordinator import XploraDataUpdateCoordinator
 from .push_config import FIREBASE_CONFIG
@@ -65,6 +66,7 @@ class XploraPush:
         self.stopping = False
         self.refresh_tasks: dict[str, asyncio.Task] = {}
         self.refresh_pending: set[str] = set()
+        self.prefetched_chats: dict[str, dict[str, Any]] = {}
 
     def start(self) -> None:
         """Network startup must not block integration setup."""
@@ -97,10 +99,49 @@ class XploraPush:
         targets = [sender] if sender in watches else watches
         if sender not in watches:
             _LOGGER.debug("Push sender has no direct watch UID match; refreshing %d configured watch(es)", len(targets))
+        matched = None
+        options = resolve(self.coordinator._entry.options)
         for wuid in targets:
+            try:
+                chats = await asyncio.wait_for(
+                    self.coordinator._with_recovery(
+                        lambda w=wuid: self.coordinator.message_data(w, options.message, options.remove_message)
+                    ),
+                    30,
+                )
+                self.coordinator.async_update_listeners()
+                self.prefetched_chats[wuid] = chats
+                for chat in chats.get("list") or []:
+                    if message["message_id"] in {str(chat.get("msgId", "")), str(chat.get("id", ""))}:
+                        matched = (wuid, chat)
+            except Exception as err:  # noqa: BLE001 -- fetch failure must not stop push delivery
+                _LOGGER.warning("Push chat verification failed (%s)", type(err).__name__)
             self.refresh_pending.add(wuid)
             if wuid not in self.refresh_tasks:
                 self.refresh_tasks[wuid] = self.hass.async_create_background_task(self.refresh_messages(wuid), f"Xplora messages {wuid}")
+        if matched:
+            wuid, chat = matched
+            actual_sender = chat.get("sender") or {}
+            if str(actual_sender.get("id", "")) in parent_ids or str(actual_sender.get("userId", "")) in parent_ids:
+                return
+            data = chat.get("data") or {}
+            message = {
+                **message,
+                "wuid": wuid,
+                "sender_name": str(data.get("sender_name") or actual_sender.get("name") or message["sender_name"]),
+                "message_type": {
+                    "TEXT": "chat_text",
+                    "VOICE": "chat_voice",
+                    "EMOTICON": "chat_emoticon",
+                    "IMAGE": "chat_image",
+                    "SHORT_VIDEO": "chat_video",
+                }.get(chat.get("type"), "chat_unknown"),
+                "text": str(data.get("text") or data.get("emoticon_id") or ""),
+            }
+        else:
+            # Unverified push labels can misdescribe emoji as voice. Deliver a
+            # generic alert rather than claiming a type we could not verify.
+            message = {**message, "message_type": "chat_unknown", "text": ""}
         self.hass.bus.async_fire(EVENT_MESSAGE, {"entry_id": self.entry_id, **message})
 
     async def refresh_messages(self, wuid: str) -> None:
@@ -112,7 +153,8 @@ class XploraPush:
             while wuid in self.refresh_pending and not self.stopping:
                 self.refresh_pending.discard(wuid)
                 try:
-                    await service.async_prefetch_watch(self.coordinator, wuid)
+                    chats = self.prefetched_chats.pop(wuid, None)
+                    await service.async_prefetch_watch(self.coordinator, wuid, chats=chats)
                 except Exception as err:  # noqa: BLE001 -- optional cache fetch must not stop push delivery
                     _LOGGER.warning("Xplora message prefetch failed (%s)", type(err).__name__)
         finally:
@@ -202,6 +244,7 @@ class XploraPush:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
         self.refresh_pending.clear()
+        self.prefetched_chats.clear()
         if self.task:
             self.task.cancel()
             await asyncio.gather(self.task, return_exceptions=True)

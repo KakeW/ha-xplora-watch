@@ -1,17 +1,20 @@
 # Push message notifications
 
 Enable **Receive push messages** in the integration's options.
-Polling can remain off. Each new chat push emits a Home Assistant event named
-`xplora_watch_message`, except when its sender matches the logged-in parent's
-known account identifiers. An unknown push sender is still delivered, because
-push identifiers do not necessarily match watch UIDs.
+Polling can remain off. Chat pushes are checked against the fetched thread by
+message ID before emitting `xplora_watch_message`. Parent replies are suppressed
+using the thread's sender, and notification text/type come from the actual chat
+(including emoji). Push sender identifiers alone are not sufficient.
 
 An incoming push also starts a background fetch of that watch's chat thread and
 media (or all selected watches if its sender cannot be mapped directly), so the
 card can use the cached messages when opened. Thread contents are
-published before media downloads finish. Notifications do not wait for this fetch;
-opening the card immediately can still precede its completion. Fetching does not
-mark messages read or fetch location.
+published before media downloads finish and before the notification is emitted.
+The fetched unread messages also update the counter without waiting for polling.
+Fetching does not mark messages read or fetch location. Media downloads can still
+be in progress when the card opens. If verification fails or the message is absent
+from the fetched window, a generic notification is emitted with `chat_unknown`;
+an outgoing echo cannot be suppressed through thread verification in that case.
 
 The user confirmed both text and voice notifications through HA to their iPhone
 on 2026-09-14. The official iOS bundle also names `chat_emoticon`, `chat_image`

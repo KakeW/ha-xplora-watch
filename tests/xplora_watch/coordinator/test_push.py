@@ -11,7 +11,15 @@ from custom_components.xplora_watch.push import EVENT_MESSAGE, XploraPush, parse
 
 @pytest.fixture(autouse=True)
 def prefetch(coordinator):
+    async def metadata(wuid, *_args):
+        return (
+            {"list": [{"msgId": "123", "id": "chat123", "sender": {"id": "watch-test"}, "type": "TEXT", "data": {"text": "Hello"}}]}
+            if wuid == "watch-test"
+            else {"list": []}
+        )
+
     with (
+        patch.object(coordinator, "message_data", side_effect=metadata),
         patch.object(type(coordinator), "_configured_wuids", new_callable=PropertyMock, return_value=["watch-test", "other"]),
         patch(
             "custom_components.xplora_watch.services.XploraMessageSensorUpdateService.async_prefetch_watch", new_callable=AsyncMock
@@ -24,7 +32,8 @@ async def test_incoming_prefetches_without_waiting_for_card(hass, coordinator, p
     receiver = XploraPush(hass, coordinator, "test")
     await receiver.consume(parse_message(payload()))
     await asyncio.gather(*receiver.refresh_tasks.values())
-    prefetch.assert_awaited_once_with(coordinator, "watch-test")
+    assert prefetch.await_args.args == (coordinator, "watch-test")
+    assert prefetch.await_args.kwargs["chats"]["list"][0]["msgId"] == "123"
     await receiver.stop()
 
 
@@ -65,7 +74,7 @@ async def test_parent_user_id_alias_is_suppressed(hass, coordinator, prefetch):
 async def test_burst_serializes_and_fetches_again_for_new_push(hass, coordinator, prefetch):
     entered, release = asyncio.Event(), asyncio.Event()
 
-    async def fetch(*_args):
+    async def fetch(*_args, **_kwargs):
         entered.set()
         await release.wait()
 
@@ -78,6 +87,36 @@ async def test_burst_serializes_and_fetches_again_for_new_push(hass, coordinator
     release.set()
     await asyncio.gather(*receiver.refresh_tasks.values())
     assert prefetch.await_count == 2
+    await receiver.stop()
+
+
+async def test_thread_suppresses_parent_even_when_push_sender_is_unknown(hass, coordinator, prefetch):
+    coordinator.message_data.side_effect = None
+    coordinator.message_data.return_value = {
+        "list": [{"msgId": "123", "sender": {"id": coordinator.user_id}, "type": "TEXT", "data": {"text": "Reply"}}]
+    }
+    receiver = XploraPush(hass, coordinator, "test")
+    events = []
+    hass.bus.async_listen(EVENT_MESSAGE, lambda event: events.append(event.data))
+    await receiver.consume(parse_message(payload(sender="unmapped-parent-push")))
+    await hass.async_block_till_done()
+    assert events == []
+    await receiver.stop()
+
+
+async def test_emoji_type_and_text_come_from_thread_before_notification(hass, coordinator, prefetch):
+    coordinator.message_data.side_effect = None
+    coordinator.message_data.return_value = {
+        "list": [{"msgId": "123", "sender": {"id": "watch-test"}, "type": "EMOTICON", "data": {"emoticon_id": "😘", "text": ""}}]
+    }
+    receiver = XploraPush(hass, coordinator, "test")
+    events = []
+    hass.bus.async_listen(EVENT_MESSAGE, lambda event: events.append(event.data))
+    await receiver.consume(parse_message(payload(msg_type="chat_voice", text="Uusi ääniviesti")))
+    await hass.async_block_till_done()
+    assert events[0]["message_type"] == "chat_emoticon"
+    assert events[0]["text"] == "😘"
+    coordinator.message_data.assert_awaited()
     await receiver.stop()
 
 

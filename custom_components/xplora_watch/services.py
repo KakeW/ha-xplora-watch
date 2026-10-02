@@ -66,7 +66,6 @@ from .const import (
     ATTR_SERVICE_WEEKDAYS,
     ATTR_SILENT,
     DOMAIN,
-    SENSOR_MESSAGE,
 )
 from .coordinator import XploraDataUpdateCoordinator
 from .helper import (
@@ -871,10 +870,11 @@ class XploraMessageService(XploraService):
 class XploraMessageSensorUpdateService(XploraService):
     """Create a service that can be used to read messages from Watch."""
 
-    async def async_prefetch_watch(self, coordinator: XploraDataUpdateCoordinator, watch: str) -> None:
+    async def async_prefetch_watch(self, coordinator: XploraDataUpdateCoordinator, watch: str, chats: dict[str, Any] | None = None) -> None:
         """Publish a push-triggered thread before downloading its media; never mark read."""
-        resolved = resolve(coordinator._entry.options)
-        chats = await coordinator._with_recovery(lambda: coordinator.message_data(watch, resolved.message, resolved.remove_message))
+        if chats is None:
+            resolved = resolve(coordinator._entry.options)
+            chats = await coordinator._with_recovery(lambda: coordinator.message_data(watch, resolved.message, resolved.remove_message))
         coordinator.async_update_listeners()
         for chat in chats.get("list") or []:
             fetch = {
@@ -891,7 +891,6 @@ class XploraMessageSensorUpdateService(XploraService):
 
         async def body(account: _Account) -> None:
             coordinator = account.coordinator
-            old_state: dict[str, Any] = coordinator.data
             resolved = resolve(coordinator._entry.options)
             limit: int = resolved.message
             show_remove_msg = resolved.remove_message
@@ -920,13 +919,11 @@ class XploraMessageSensorUpdateService(XploraService):
                 except (AuthError, RateLimitError, XploraConnectionError) as error:
                     _log_api_error("Read messages", account.log, error)
                     account.broken = True
-                new_data_msg: dict[str, Any] = old_state.get(watch, {}) if isinstance(old_state, dict) else {}
-                if new_data_msg:
-                    new_data_msg.update({SENSOR_MESSAGE: res_chats})
-                    old_state.update({watch: new_data_msg})
                 if account.broken:
                     break
-            await coordinator.async_update_xplora_data(new_data=old_state)
+            # message_data already merged the thread, unread count and local
+            # receipts. Publish its current state, not a pre-fetch snapshot.
+            await coordinator.async_update_xplora_data(new_data=coordinator.data)
 
         await self._fan_out(data, ATTR_SERVICE_READ_MSG, body)
 

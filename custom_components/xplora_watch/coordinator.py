@@ -1589,6 +1589,27 @@ class XploraDataUpdateCoordinator(DataUpdateCoordinator):
         async with self._update_lock:
             watch_entry = dict(self.data or {})
             watch_data = dict(watch_entry.get(wuid) or {})
+            acknowledged = {
+                str(item.get("msgId"))
+                for item in (watch_data.get(SENSOR_MESSAGE) or {}).get("list") or []
+                if item.get(ATTR_CHAT_READ_RECEIPT_SENT)
+            }
+            for item in chats.get("list") or []:
+                if str(item.get("msgId")) in acknowledged:
+                    item[ATTR_CHAT_READ_RECEIPT_SENT] = True
+            # A push can arrive before the next deviceList poll. The fetched
+            # window gives a lower bound, not a total (older unread may exist).
+            unread = sum(
+                1
+                for item in chats.get("list") or []
+                if item.get("readFlag") == CHAT_READ_FLAG_UNREAD
+                and not item.get(ATTR_CHAT_READ_RECEIPT_SENT)
+                and (item.get("sender") or {}).get("id")
+                and str((item.get("sender") or {}).get("id", "")) != str(self.user_id)
+            )
+            if unread:
+                previous = watch_data.get("unreadMsg")
+                watch_data["unreadMsg"] = max(previous if isinstance(previous, int) else 0, unread)
             watch_data[SENSOR_MESSAGE] = chats
             watch_entry[wuid] = watch_data
             self.data = watch_entry
