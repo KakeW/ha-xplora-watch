@@ -896,7 +896,14 @@ class XploraMessageSensorUpdateService(XploraService):
                 "IMAGE": self._fetch_chat_image,
             }.get(chat.get("type"))
             if fetch:
-                await fetch(coordinator, watch, chat.get("msgId"))
+                if await fetch(coordinator, watch, chat.get("msgId")):
+                    self._publish_media(coordinator, watch)
+
+    @staticmethod
+    def _publish_media(coordinator: XploraDataUpdateCoordinator, watch: str) -> None:
+        """Notify open cards after attachment downloads, even if chats did not change."""
+        coordinator.chat_media_revision[watch] = coordinator.chat_media_revision.get(watch, 0) + 1
+        coordinator.async_update_listeners()
 
     async def async_read_message(self, **kwargs: Any) -> None:
         """Read the messages from account."""
@@ -923,12 +930,15 @@ class XploraMessageSensorUpdateService(XploraService):
                     for chat in res_chats.get("list") or []:
                         chat_type = chat.get("type")
                         msg_id = chat.get("msgId")
+                        downloaded = False
                         if chat_type == "VOICE":
-                            await self._fetch_chat_voice(coordinator, watch, msg_id)
+                            downloaded = await self._fetch_chat_voice(coordinator, watch, msg_id)
                         elif chat_type == "SHORT_VIDEO":
-                            await self._fetch_chat_short_video(coordinator, watch, msg_id)
+                            downloaded = await self._fetch_chat_short_video(coordinator, watch, msg_id)
                         elif chat_type == "IMAGE":
-                            await self._fetch_chat_image(coordinator, watch, msg_id)
+                            downloaded = await self._fetch_chat_image(coordinator, watch, msg_id)
+                        if downloaded:
+                            self._publish_media(coordinator, watch)
                 except (AuthError, RateLimitError, XploraConnectionError) as error:
                     _log_api_error("Read messages", account.log, error)
                     account.broken = True
@@ -960,34 +970,39 @@ class XploraMessageSensorUpdateService(XploraService):
 
         await self._fan_out(data, ATTR_SERVICE_MARK_MSG_READ, body)
 
-    async def _fetch_chat_voice(self, coordinator: XploraDataUpdateCoordinator, watch_id: str, msg_id: str) -> None:
+    async def _fetch_chat_voice(self, coordinator: XploraDataUpdateCoordinator, watch_id: str, msg_id: str) -> bool:
         # `coordinator` is passed in (not read from instance state) so concurrent read_message calls
         # for different accounts never cross wires (ADR 0004).
         # Already downloaded -> skip the remote (rate-limited) fetch and serve the cached file.
         if chat_media_cached(self._hass, msg_id, "mp3", "voice"):
-            return
+            return False
         voice = await coordinator._with_recovery(lambda: coordinator.controller.get_chat_voice(watch_id, msg_id))
         if voice:
             await encoded_base64_string_to_mp3_file(self._hass, voice, msg_id)
+            return True
+        return False
 
-    async def _fetch_chat_short_video(self, coordinator: XploraDataUpdateCoordinator, watch_id: str, msg_id: str) -> None:
+    async def _fetch_chat_short_video(self, coordinator: XploraDataUpdateCoordinator, watch_id: str, msg_id: str) -> bool:
         # Skip the remote fetch only once BOTH the video and its thumbnail are cached.
         if chat_media_cached(self._hass, msg_id, "mp4", "video") and chat_media_cached(self._hass, msg_id, "jpeg", "video/thumb"):
-            return
+            return False
         video = await coordinator._with_recovery(lambda: coordinator.controller.get_short_video(watch_id, msg_id))
         if video:
             await encoded_base64_string_to_file(self._hass, video, msg_id, "mp4", "video")
         thumb = await coordinator._with_recovery(lambda: coordinator.controller.get_short_video_cover(watch_id, msg_id))
         if thumb:
             await encoded_base64_string_to_file(self._hass, thumb, msg_id, "jpeg", "video/thumb")
+        return bool(video or thumb)
 
-    async def _fetch_chat_image(self, coordinator: XploraDataUpdateCoordinator, watch_id: str, msg_id: str) -> None:
+    async def _fetch_chat_image(self, coordinator: XploraDataUpdateCoordinator, watch_id: str, msg_id: str) -> bool:
         # Already downloaded -> skip the remote (rate-limited) fetch and serve the cached file.
         if chat_media_cached(self._hass, msg_id, "jpeg", "image"):
-            return
+            return False
         image = await coordinator._with_recovery(lambda: coordinator.controller.get_chat_image(watch_id, msg_id))
         if image:
             await encoded_base64_string_to_file(self._hass, image, msg_id, "jpeg", "image")
+            return True
+        return False
 
 
 class XploraShutdownService(XploraService):

@@ -40,6 +40,7 @@ async def test_push_prefetch_publishes_thread_before_media_and_does_not_mark_rea
 
     async def media(*_args):
         order.append("media")
+        return True
 
     with (
         patch.object(
@@ -49,7 +50,8 @@ async def test_push_prefetch_publishes_thread_before_media_and_does_not_mark_rea
         patch.object(service, "_fetch_chat_voice", side_effect=media),
     ):
         await service.async_prefetch_watch(coordinator, DEFAULT_WUID)
-    assert order == ["published", "media"]
+    assert order == ["published", "media", "published"]
+    assert coordinator.chat_media_revision[DEFAULT_WUID] == 1
     assert fetch.call_args.kwargs["mark_as_read"] is False
     assert coordinator.data[DEFAULT_WUID][SENSOR_MESSAGE]["list"][0]["readFlag"] == 2
 

@@ -152,6 +152,7 @@ class XploraDataUpdateCoordinator(DataUpdateCoordinator):
         # -- for the same watch would collide and wrongly skip the one-time `isAdmin` fetch.
         self.is_admin: dict[str, bool] = {}
         self.push: Any = None
+        self.chat_media_revision: dict[str, int] = {}
         # Resolve user options once: `options_update_listener` reloads the entry (rebuilding
         # this coordinator) on every options change, so a single resolution here is always
         # current. `resolve()` snaps the scan interval to a supported preset internally.

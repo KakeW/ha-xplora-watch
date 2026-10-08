@@ -106,6 +106,7 @@ async def test_extra_state_attributes_message_merges_chats(
 ) -> None:
     """SENSOR_MESSAGE merges the chats dict into attributes when it is truthy."""
     coordinator_with_data.data[DEFAULT_WUID][SENSOR_MESSAGE] = {"list": [{"id": "msg-1"}]}
+    coordinator_with_data.chat_media_revision[DEFAULT_WUID] = 3
     sensor = _make_sensor(hass, mock_config_entry_phone, coordinator_with_data, SENSOR_MESSAGE)
 
     attributes = sensor.extra_state_attributes
@@ -117,6 +118,7 @@ async def test_extra_state_attributes_message_merges_chats(
         CONF_REFRESH_ON_CARD_RENDER: False,
         ATTR_XPLORA_ROLE: SENSOR_MESSAGE,
         "list": [{"id": "msg-1"}],
+        "media_revision": 3,
         "entry_id": mock_config_entry_phone.entry_id,
         "wuid": DEFAULT_WUID,
         "account_user_id": coordinator_with_data.user_id,
@@ -142,6 +144,7 @@ async def test_extra_state_attributes_message_exposes_ids_when_no_chats_yet(
     assert attributes == {
         CONF_REFRESH_ON_CARD_RENDER: False,
         ATTR_XPLORA_ROLE: SENSOR_MESSAGE,
+        "media_revision": 0,
         "entry_id": mock_config_entry_phone.entry_id,
         "wuid": DEFAULT_WUID,
         "account_user_id": coordinator_with_data.user_id,

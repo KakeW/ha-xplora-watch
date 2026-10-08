@@ -7,6 +7,49 @@ beforeAll(async () => {
 });
 
 describe("setConfig", () => {
+  it("recovers when an old media URL fails after readiness was published", async () => {
+    const messages = [chat("late", { type: "VOICE" })];
+    const el = mountChat(messages);
+    const audio = el.shadowRoot.querySelector(".media-audio");
+    const updated = makeHass(messages);
+    updated.states["sensor.watch_message"].attributes.media_revision = 1;
+    el.hass = updated;
+    audio.dispatchEvent(new Event("error"));
+    await new Promise((resolve) => queueMicrotask(resolve));
+    expect(el.shadowRoot.querySelector(".media-audio")).not.toBe(audio);
+    expect(el.shadowRoot.querySelector(".media-audio").getAttribute("src")).toContain("?v=1-");
+    expect(el.shadowRoot.querySelectorAll('[data-key="late"]')).toHaveLength(1);
+  });
+
+  it("refresh retries a failed attachment without a changed sensor or duplicate bubble", async () => {
+    const el = mountChat([chat("voice", { type: "VOICE" })]);
+    const audio = el.shadowRoot.querySelector(".media-audio");
+    const originalUrl = audio.getAttribute("src");
+    audio.dispatchEvent(new Event("error"));
+    expect(el.shadowRoot.querySelector(".media-wrap.broken")).toBeTruthy();
+    await el._refresh();
+    const replacement = el.shadowRoot.querySelector(".media-audio");
+    expect(replacement).not.toBe(audio);
+    expect(replacement.getAttribute("src")).not.toBe(originalUrl);
+    expect(el.shadowRoot.querySelectorAll('[data-key="voice"]')).toHaveLength(1);
+    expect(el.shadowRoot.querySelector(".media-wrap.broken")).toBeNull();
+  });
+
+  it("media completion retries broken bubbles while preserving healthy audio", () => {
+    const messages = [chat("failed", { type: "VOICE" }), chat("playing", { type: "VOICE" })];
+    const el = mountChat(messages);
+    const failed = el.shadowRoot.querySelector('[data-key="failed"] .media-audio');
+    const healthy = el.shadowRoot.querySelector('[data-key="playing"] .media-audio');
+    failed.dispatchEvent(new Event("error"));
+    const updated = makeHass(messages);
+    updated.states["sensor.watch_message"].attributes.media_revision = 1;
+    el.hass = updated;
+    expect(el.shadowRoot.querySelector('[data-key="failed"] .media-audio')).not.toBe(failed);
+    expect(el.shadowRoot.querySelector('[data-key="failed"] .media-audio').getAttribute("src")).toContain("?v=1-");
+    expect(el.shadowRoot.querySelector('[data-key="playing"] .media-audio')).toBe(healthy);
+    expect(el.shadowRoot.querySelectorAll(".bubble-row")).toHaveLength(2);
+  });
+
   it("sends a picked Xplora emoji as an emoticon and preserves the typed draft", async () => {
     const calls = [];
     const el = mountChat([], { callService: async (...args) => { calls.push(args); } });

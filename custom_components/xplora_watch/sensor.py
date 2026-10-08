@@ -291,6 +291,7 @@ class XploraSensor(XploraBaseEntity, SensorEntity):
                 entry_id=self._config_entry.entry_id,
                 wuid=self.watch_uid,
                 account_user_id=self.coordinator.user_id,
+                media_revision=self.coordinator.chat_media_revision.get(self.watch_uid, 0),
                 **messages,
             )
         return dict(data, user=self.coordinator.controller.getUserName())

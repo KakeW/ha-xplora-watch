@@ -3455,6 +3455,8 @@ const EMOJI_MAP = Object.freeze({
 class XploraWatchChatCard extends HTMLElement {
   constructor() {
     super();
+    this._mediaRetryGeneration = 0;
+    this._mediaCacheKey = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
     this.attachShadow({ mode: "open" });
     this._hass = null;
     this._config = null;
@@ -3541,7 +3543,7 @@ class XploraWatchChatCard extends HTMLElement {
     // The "no state" case splits into coming-up vs missing (see entityMissing); fold that into the
     // signature so the placeholder re-renders when the registry verdict flips, not only on state.
     const empty = entityMissing(hass, this._config.entity) ? "missing" : "∅";
-    const sig = (s ? `${s.state}@${s.last_updated}` : empty) + "|" + this._locale();
+    const sig = (s ? `${s.state}@${s.last_updated}|media:${s.attributes.media_revision || 0}` : empty) + "|" + this._locale();
     if (!this._built || sig !== this._sig) {
       this._sig = sig;
       this._render();
@@ -3729,6 +3731,10 @@ class XploraWatchChatCard extends HTMLElement {
       if (remaining > 0) await new Promise((resolve) => setTimeout(resolve, remaining));
       this._refreshing = false;
       this._syncControls();
+      // Files can become available without a changed chat payload. Rebuild only
+      // failed bubbles with a fresh URL; retain loaded media and ongoing playback.
+      this._mediaRetryGeneration++;
+      this._render();
     }
   }
 
@@ -3840,11 +3846,16 @@ class XploraWatchChatCard extends HTMLElement {
 
     // Index the bubbles already in the DOM by key, then walk the desired order: reuse a matching
     // node (moving it into place if needed) or create a new one. Leftovers are removed at the end.
-    // Bubbles whose media failed to load are skipped (left out of the reuse map) so they're rebuilt
-    // fresh -- this retries the media, recovering once a previously-missing file gets downloaded.
+    // Replace failed bubbles so media is retried once the file becomes available.
+    const discard = (n) => {
+      if (this._readObserver) this._readObserver.unobserve(n);
+      const timer = this._readTimers.get(n);
+      if (timer) clearTimeout(timer);
+      this._readTimers.delete(n);
+      n.remove();
+    };
     const existing = new Map();
     el.querySelectorAll(":scope > [data-key]").forEach((n) => {
-      if (n.querySelector(".media-wrap.broken")) return;
       existing.set(n.getAttribute("data-key"), n);
     });
 
@@ -3853,9 +3864,12 @@ class XploraWatchChatCard extends HTMLElement {
     for (const msg of msgs) {
       const key = this._msgKey(msg);
       let node = existing.get(key);
-      if (node) {
-        existing.delete(key);
-      } else {
+      if (node && node.querySelector(".media-wrap.broken")) {
+        discard(node);
+        node = null;
+      }
+      existing.delete(key);
+      if (!node) {
         node = this._bubbleNode(msg);
         appended = true;
       }
@@ -3876,13 +3890,7 @@ class XploraWatchChatCard extends HTMLElement {
       if (node !== want) el.insertBefore(node, want);
       cursor = node;
     }
-    existing.forEach((n) => {
-      if (this._readObserver) this._readObserver.unobserve(n);
-      const timer = this._readTimers.get(n);
-      if (timer) clearTimeout(timer);
-      this._readTimers.delete(n);
-      n.remove();
-    });
+    existing.forEach(discard);
 
     if (pinned && appended) this._scrollToBottom();
   }
@@ -3901,6 +3909,7 @@ class XploraWatchChatCard extends HTMLElement {
     const tpl = document.createElement("template");
     tpl.innerHTML = this._bubble(msg).trim();
     const node = tpl.content.firstElementChild;
+    node._xploraMediaRevision = Number(this._attrs().media_revision) || 0;
     this._wireReadReceipt(node, msg);
     node.querySelectorAll(".media-img, .media-audio, .media-video").forEach((m) => {
       m.addEventListener(
@@ -3908,6 +3917,11 @@ class XploraWatchChatCard extends HTMLElement {
         () => {
           const wrap = m.closest(".media-wrap");
           if (wrap) wrap.classList.add("broken");
+          // A delayed error from an older URL may arrive just after readiness
+          // was published. Retry that stale URL once using the current revision.
+          if (node._xploraMediaRevision !== (Number(this._attrs().media_revision) || 0)) {
+            queueMicrotask(() => { if (node.isConnected) this._render(); });
+          }
         },
         { once: true },
       );
@@ -4219,9 +4233,12 @@ class XploraWatchChatCard extends HTMLElement {
     const id = msg && msg.msgId;
     if (!id) return "";
     const eid = this._esc(id);
+    const revision = Number(this._attrs().media_revision) || 0;
+    const retry = this._mediaRetryGeneration || 0;
+    const version = revision || retry ? `?v=${revision}-${retry}&view=${this._mediaCacheKey}` : "";
     switch (msg.type) {
       case "IMAGE": {
-        const url = `${MEDIA.image}/${eid}.jpeg`;
+        const url = `${MEDIA.image}/${eid}.jpeg${version}`;
         return `<div class="media-wrap">
                   <a class="media-link" href="${url}" target="_blank" rel="noopener">
                     <img class="media-img" src="${url}" alt="Image" loading="lazy" />
@@ -4231,7 +4248,7 @@ class XploraWatchChatCard extends HTMLElement {
                 </div>`;
       }
       case "VOICE": {
-        const url = `${MEDIA.voice}/${eid}.mp3`;
+        const url = `${MEDIA.voice}/${eid}.mp3${version}`;
         return `<div class="media-wrap media-wrap-audio">
                   <audio class="media-audio" controls preload="metadata" src="${url}"></audio>
                   ${this._downloadBtn(url, `${eid}.mp3`)}
@@ -4239,8 +4256,8 @@ class XploraWatchChatCard extends HTMLElement {
                 </div>`;
       }
       case "SHORT_VIDEO": {
-        const url = `${MEDIA.video}/${eid}.mp4`;
-        const thumb = `${MEDIA.video}/thumb/${eid}.jpeg`;
+        const url = `${MEDIA.video}/${eid}.mp4${version}`;
+        const thumb = `${MEDIA.video}/thumb/${eid}.jpeg${version}`;
         return `<div class="media-wrap">
                   <video class="media-video" preload="none" controls>
                     <source src="${url}" type="video/mp4" />
