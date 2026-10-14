@@ -42,6 +42,10 @@ your phone's location; check the location age in the map banner. If native shari
 the card offers an Apple Maps link so you can share from Maps instead. Receiving the shared link
 in Bosch eBike Flow still needs verification on a physical iPhone.
 
+For sharing compatibility tests, the map offers a **Share format (test)** selector: Apple Maps
+link (default), Google Maps link, or GPS coordinates as plain text. Select a format, then tap the
+share icon and choose the receiving app. The selection lasts for the current map-card instance.
+
 <p>
   <img src="https://raw.githubusercontent.com/distante/ha-xplora-watch/main/images/overview_card.png" alt="Overview card" height="420">
   <img src="https://raw.githubusercontent.com/distante/ha-xplora-watch/main/images/full_map_location.png" alt="Map location popup" height="420">

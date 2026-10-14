@@ -2956,6 +2956,7 @@ class XploraWatchMapCard extends HTMLElement {
     this._autoRefreshDone = false; // guard so "refresh on render" fires once per card instance
     this._reloading = false; // a reload is in flight (drives the spinner + guards a double press)
     this._shareFeedback = "";
+    this._shareFormat = "apple";
     this._popup = new CardPopupHost(this.shadowRoot, () => this._hass);
   }
 
@@ -3187,10 +3188,19 @@ class XploraWatchMapCard extends HTMLElement {
         ${shareBtn}${reloadBtn}${expandBtn}
       </div>`;
 
-    this._card.innerHTML = `${this._headerHtml(trk)}${bannerHtml}<div class="map-share-feedback" role="status"${this._shareFeedback && coords ? "" : " hidden"}>${this._esc(this._shareFeedback)} <a data-share-fallback target="_blank" rel="noopener noreferrer">${this._shareText("Avaa Apple Kartoissa", "Open in Apple Maps")}</a></div><div class="map-body"></div>`;
+    const shareFormatHtml = coords ? `<label class="map-share-format">
+      <span>${this._shareText("Jakomuoto (testi)", "Share format (test)")}</span>
+      <select data-share-format>
+        <option value="apple"${this._shareFormat === "apple" ? " selected" : ""}>Apple Maps (${this._shareText("linkki", "link")})</option>
+        <option value="google"${this._shareFormat === "google" ? " selected" : ""}>Google Maps (${this._shareText("linkki", "link")})</option>
+        <option value="text"${this._shareFormat === "text" ? " selected" : ""}>${this._shareText("GPS-koordinaatit (teksti)", "GPS coordinates (text)")}</option>
+      </select></label>` : "";
+    this._card.innerHTML = `${this._headerHtml(trk)}${bannerHtml}${shareFormatHtml}<div class="map-share-feedback" role="status"${this._shareFeedback && coords ? "" : " hidden"}>${this._esc(this._shareFeedback)} <a data-share-fallback target="_blank" rel="noopener noreferrer">${this._shareText("Avaa Apple Kartoissa", "Open in Apple Maps")}</a></div><div class="map-body"></div>`;
 
     const shareEl = this._card.querySelector("[data-share]");
     if (shareEl) shareEl.addEventListener("click", () => this._shareLocation());
+    const formatEl = this._card.querySelector("[data-share-format]");
+    if (formatEl) formatEl.addEventListener("change", () => { this._shareFormat = formatEl.value; });
     const fallbackEl = this._card.querySelector("[data-share-fallback]");
     if (coords) fallbackEl.href = this._locationUrl(coords);
 
@@ -3237,8 +3247,14 @@ class XploraWatchMapCard extends HTMLElement {
     } else {
       try {
         // No asynchronous work before this call: Web Share requires the tap's user activation.
-        // URL only lets receiving map apps parse the location without unrelated text.
-        await navigator.share({ url: this._locationUrl(coords) });
+        // Keep URL and text tests separate: no extra title, text or URL alongside the selected payload.
+        const pair = `${coords.lat},${coords.lng}`;
+        const payload = this._shareFormat === "text"
+          ? { text: pair }
+          : { url: this._shareFormat === "google"
+              ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(pair)}`
+              : this._locationUrl(coords) };
+        await navigator.share(payload);
       } catch (e) {
         if (e?.name !== "AbortError") {
           this._shareFeedback = this._shareText(
@@ -3388,6 +3404,11 @@ class XploraWatchMapCard extends HTMLElement {
       .map-share-feedback { padding: 8px 14px; color: var(--primary-text-color); }
       .map-share-feedback[hidden] { display: none; }
       .map-share-feedback a { color: var(--primary-color); }
+      .map-share-format { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 8px 14px;
+        flex: 0 0 auto; font-size: 0.9rem; border-bottom: 1px solid var(--divider-color); }
+      .map-share-format select { flex: 1 1 180px; min-width: 0; max-width: 100%; min-height: 44px;
+        font: inherit; color: var(--primary-text-color); background: var(--card-background-color, white);
+        border: 1px solid var(--divider-color); border-radius: 8px; padding: 4px 8px; }
       @keyframes xplora-spin { to { transform: rotate(360deg); } }
       .map-reload ha-icon.spin { animation: xplora-spin 0.9s linear infinite; }
 

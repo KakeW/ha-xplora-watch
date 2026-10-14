@@ -155,6 +155,61 @@ function stubMapHelpers() {
 const flush = () => vi.runAllTimersAsync();
 
 describe("map card — location sharing", () => {
+  function selectFormat(el, value) {
+    const select = el.shadowRoot.querySelector("[data-share-format]");
+    select.value = value;
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  it("offers exactly three test formats in both inline and fullscreen views", () => {
+    const el = mount({ device: DEV }, makeHass());
+    for (const fill of [false, true]) {
+      el.fill = fill;
+      const select = el.shadowRoot.querySelector("[data-share-format]");
+      expect([...select.options].map(o => o.value)).toEqual(["apple", "google", "text"]);
+      expect(select.value).toBe("apple");
+    }
+  });
+
+  it("shares only the Google Maps URL when selected", () => {
+    const share = vi.fn(async () => {});
+    vi.stubGlobal("navigator", { share });
+    const el = mount({ device: DEV }, makeHass());
+    selectFormat(el, "google");
+    expect(share).not.toHaveBeenCalled();
+    el.shadowRoot.querySelector("[data-share]").click();
+    expect(share).toHaveBeenCalledWith({ url: "https://www.google.com/maps/search/?api=1&query=52.53%2C13.41" });
+  });
+
+  it("shares only raw coordinates as text, retaining negative and zero coordinates", () => {
+    const share = vi.fn(async () => {});
+    vi.stubGlobal("navigator", { share });
+    const hass = makeHass();
+    const el = mount({ device: DEV }, hass);
+    selectFormat(el, "text");
+    hass.states[TRK].attributes.latitude = -33.1234567;
+    hass.states[TRK].attributes.longitude = 0;
+    el.shadowRoot.querySelector("[data-share]").click();
+    expect(share).toHaveBeenCalledWith({ text: "-33.1234567,0" });
+    expect(hass.callService).not.toHaveBeenCalled();
+  });
+
+  it("preserves selection across background state updates and sharing cancellation", async () => {
+    vi.stubGlobal("navigator", { share: vi.fn(async () => { throw new DOMException("Cancelled", "AbortError"); }) });
+    const el = mount({ device: DEV }, makeHass());
+    selectFormat(el, "text");
+    el.hass = makeHass({ stamp: FRESH_FIX });
+    expect(el.shadowRoot.querySelector("[data-share-format]").value).toBe("text");
+    el.shadowRoot.querySelector("[data-share]").click();
+    await flush();
+    expect(el.shadowRoot.querySelector("[data-share-format]").value).toBe("text");
+  });
+
+  it("does not offer the format selector without coordinates", () => {
+    const el = mount({ device: DEV }, makeHass({ coords: false }));
+    expect(el.shadowRoot.querySelector("[data-share-format]")).toBeNull();
+  });
+
   it("shares only an Apple Maps coordinate URL from the fullscreen popup", async () => {
     const share = vi.fn(async () => {});
     vi.stubGlobal("navigator", { share });
