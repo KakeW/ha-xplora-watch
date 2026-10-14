@@ -38,6 +38,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.unstubAllGlobals();
   vi.useRealTimers();
   document.body.innerHTML = "";
   vi.restoreAllMocks();
@@ -152,6 +153,79 @@ function stubMapHelpers() {
 
 // Let the card's async map build (await loadCardHelpers -> await createCardElement) settle.
 const flush = () => vi.runAllTimersAsync();
+
+describe("map card — location sharing", () => {
+  it("shares only an Apple Maps coordinate URL from the fullscreen popup", async () => {
+    const share = vi.fn(async () => {});
+    vi.stubGlobal("navigator", { share });
+    const el = mount({ device: DEV }, makeHass());
+    el.fill = true;
+    el.shadowRoot.querySelector("[data-share]").click();
+    expect(share).toHaveBeenCalledWith({ url: "https://maps.apple.com/place?coordinate=52.53,13.41" });
+    await flush();
+    expect(el.shadowRoot.querySelector(".map-share-feedback").hidden).toBe(true);
+  });
+
+  it("uses the latest watch coordinates at the tap, with no service call", () => {
+    const share = vi.fn(async () => {});
+    vi.stubGlobal("navigator", { share });
+    const hass = makeHass();
+    const el = mount({ device: DEV }, hass);
+    hass.states[TRK].attributes.latitude = -33.1234567;
+    hass.states[TRK].attributes.longitude = 0;
+    el.shadowRoot.querySelector("[data-share]").click();
+    expect(share).toHaveBeenCalledWith({ url: "https://maps.apple.com/place?coordinate=-33.1234567,0" });
+    expect(hass.callService).not.toHaveBeenCalled();
+  });
+
+  it.each([undefined, NaN, "", 91])("does not offer sharing for invalid latitude %s", (latitude) => {
+    const hass = makeHass();
+    hass.states[TRK].attributes.latitude = latitude;
+    const el = mount({ device: DEV }, hass);
+    expect(el.shadowRoot.querySelector("[data-share]")).toBeNull();
+  });
+
+  it("does not share a location removed since rendering", () => {
+    const share = vi.fn();
+    vi.stubGlobal("navigator", { share });
+    const hass = makeHass();
+    const el = mount({ device: DEV }, hass);
+    delete hass.states[TRK].attributes.latitude;
+    el.shadowRoot.querySelector("[data-share]").click();
+    expect(share).not.toHaveBeenCalled();
+  });
+
+  it("offers Apple Maps fallback when native sharing is unavailable", async () => {
+    vi.stubGlobal("navigator", {});
+    const hass = makeHass();
+    hass.locale.language = "fi";
+    const el = mount({ device: DEV }, hass);
+    expect(el.shadowRoot.querySelector("[data-share]").getAttribute("label")).toBe("Jaa sijainti");
+    el.shadowRoot.querySelector("[data-share]").click();
+    await flush();
+    const status = el.shadowRoot.querySelector(".map-share-feedback");
+    expect(status.hidden).toBe(false);
+    expect(status.textContent).toContain("Jakovalikko ei ole käytettävissä");
+    expect(status.querySelector("a").href).toBe("https://maps.apple.com/place?coordinate=52.53,13.41");
+  });
+
+  it("does not treat cancellation as an error", async () => {
+    vi.stubGlobal("navigator", { share: vi.fn(async () => { throw new DOMException("Cancelled", "AbortError"); }) });
+    const el = mount({ device: DEV }, makeHass());
+    el.shadowRoot.querySelector("[data-share]").click();
+    await flush();
+    expect(el.shadowRoot.querySelector(".map-share-feedback").hidden).toBe(true);
+  });
+
+  it("offers fallback when the host rejects sharing", async () => {
+    vi.stubGlobal("navigator", { share: vi.fn(async () => { throw new DOMException("Denied", "NotAllowedError"); }) });
+    const el = mount({ device: DEV }, makeHass());
+    el.shadowRoot.querySelector("[data-share]").click();
+    await flush();
+    expect(el.shadowRoot.querySelector(".map-share-feedback").textContent).toContain("Could not open sharing");
+    expect(el.shadowRoot.querySelector(".map-share-feedback").hidden).toBe(false);
+  });
+});
 
 describe("map card — registration", () => {
   it("registers as a custom element", () => {

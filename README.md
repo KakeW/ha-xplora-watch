@@ -36,6 +36,12 @@ The bundled Lovelace overview card surfaces a watch's online/charging state, bat
 location, steps, XCoins, unread messages, alarms, silent times and safe-zone status at a glance —
 tap the location row for a live map, or the **Location history** row for a full day-by-day track:
 
+The current-location map's **Share location** button shares an Apple Maps coordinate link through
+the device's native share sheet when supported. It uses the watch's last reported position, not
+your phone's location; check the location age in the map banner. If native sharing is unavailable,
+the card offers an Apple Maps link so you can share from Maps instead. Receiving the shared link
+in Bosch eBike Flow still needs verification on a physical iPhone.
+
 <p>
   <img src="https://raw.githubusercontent.com/distante/ha-xplora-watch/main/images/overview_card.png" alt="Overview card" height="420">
   <img src="https://raw.githubusercontent.com/distante/ha-xplora-watch/main/images/full_map_location.png" alt="Map location popup" height="420">

@@ -2955,6 +2955,7 @@ class XploraWatchMapCard extends HTMLElement {
     this._mapGen = 0; // generation token so a superseded async map build can't overwrite a newer one
     this._autoRefreshDone = false; // guard so "refresh on render" fires once per card instance
     this._reloading = false; // a reload is in flight (drives the spinner + guards a double press)
+    this._shareFeedback = "";
     this._popup = new CardPopupHost(this.shadowRoot, () => this._hass);
   }
 
@@ -3073,6 +3074,8 @@ class XploraWatchMapCard extends HTMLElement {
     const lat = trk && trk.attributes ? trk.attributes.latitude : undefined;
     const lng = trk && trk.attributes ? trk.attributes.longitude : undefined;
     if (lat == null || lng == null || !isFinite(Number(lat)) || !isFinite(Number(lng))) return null;
+    if (String(lat).trim() === "" || String(lng).trim() === "") return null;
+    if (Math.abs(Number(lat)) > 90 || Math.abs(Number(lng)) > 180) return null;
     return { lat: Number(lat), lng: Number(lng) };
   }
 
@@ -3173,14 +3176,23 @@ class XploraWatchMapCard extends HTMLElement {
       coords && !this._fill
         ? `<ha-icon-button class="map-expand" data-expand label="Expand"><ha-icon icon="mdi:arrow-expand"></ha-icon></ha-icon-button>`
         : "";
+    const shareLabel = this._shareText("Jaa sijainti", "Share location");
+    const shareBtn = coords
+      ? `<ha-icon-button class="map-share" data-share label="${shareLabel}" title="${shareLabel}"><ha-icon icon="mdi:share-variant"></ha-icon></ha-icon-button>`
+      : "";
     const bannerHtml = `
       <div class="map-banner ${banner.status}">
         <ha-icon icon="${meta.icon}"></ha-icon>
         <span class="map-banner-text">${this._esc(banner.text)}</span>
-        ${reloadBtn}${expandBtn}
+        ${shareBtn}${reloadBtn}${expandBtn}
       </div>`;
 
-    this._card.innerHTML = `${this._headerHtml(trk)}${bannerHtml}<div class="map-body"></div>`;
+    this._card.innerHTML = `${this._headerHtml(trk)}${bannerHtml}<div class="map-share-feedback" role="status"${this._shareFeedback && coords ? "" : " hidden"}>${this._esc(this._shareFeedback)} <a data-share-fallback target="_blank" rel="noopener noreferrer">${this._shareText("Avaa Apple Kartoissa", "Open in Apple Maps")}</a></div><div class="map-body"></div>`;
+
+    const shareEl = this._card.querySelector("[data-share]");
+    if (shareEl) shareEl.addEventListener("click", () => this._shareLocation());
+    const fallbackEl = this._card.querySelector("[data-share-fallback]");
+    if (coords) fallbackEl.href = this._locationUrl(coords);
 
     const reloadEl = this._card.querySelector("[data-reload]");
     if (reloadEl) reloadEl.addEventListener("click", () => this._reload());
@@ -3196,6 +3208,44 @@ class XploraWatchMapCard extends HTMLElement {
       this._resetMap();
       body.innerHTML = `<div class="map-empty">Location unavailable</div>`;
     }
+  }
+
+  // Sharing labels follow the HA language; the location-age banner remains visible above the map.
+  _shareText(fi, en) {
+    return (this._hass.locale?.language || this._hass.language || "").startsWith("fi") ? fi : en;
+  }
+
+  _locationUrl(coords) {
+    // Apple's documented place URL: share the watch's fix, never the phone/map centre.
+    return `https://maps.apple.com/place?coordinate=${coords.lat},${coords.lng}`;
+  }
+
+  async _shareLocation() {
+    // Read fresh state at the tap, even if a background update has not re-rendered yet.
+    const ent = this._resolveEntities();
+    const coords = this._coords(this._hass.states[ent.tracker]);
+    if (!coords) return;
+    this._shareFeedback = "";
+    if (typeof navigator.share !== "function") {
+      this._shareFeedback = this._shareText(
+        "Jakovalikko ei ole käytettävissä. Voit jakaa sijainnin Apple Kartoista.",
+        "Sharing is unavailable here. You can share the location from Apple Maps.",
+      );
+    } else {
+      try {
+        // No asynchronous work before this call: Web Share requires the tap's user activation.
+        // URL only lets receiving map apps parse the location without unrelated text.
+        await navigator.share({ url: this._locationUrl(coords) });
+      } catch (e) {
+        if (e?.name !== "AbortError") {
+          this._shareFeedback = this._shareText(
+            "Jakovalikkoa ei voitu avata. Voit jakaa sijainnin Apple Kartoista.",
+            "Could not open sharing. You can share the location from Apple Maps.",
+          );
+        }
+      }
+    }
+    if (this.isConnected) this._render();
   }
 
   // Drop any embedded map so a later coords-less render can't leave a stale marker around.
@@ -3331,7 +3381,10 @@ class XploraWatchMapCard extends HTMLElement {
       .map-banner.unknown { color: var(--secondary-text-color, #888); }
       .map-banner-text { flex: 1 1 auto; min-width: 0; white-space: normal; overflow-wrap: anywhere; color: var(--primary-text-color); }
       /* Fixed 48px tap targets that never shrink, so a long banner can't clip or hide them. */
-      .map-reload, .map-expand { flex: 0 0 auto; min-width: 48px; min-height: 48px; color: var(--secondary-text-color); }
+      .map-reload, .map-expand, .map-share { flex: 0 0 auto; min-width: 48px; min-height: 48px; color: var(--secondary-text-color); }
+      .map-share-feedback { padding: 8px 14px; color: var(--primary-text-color); }
+      .map-share-feedback[hidden] { display: none; }
+      .map-share-feedback a { color: var(--primary-color); }
       @keyframes xplora-spin { to { transform: rotate(360deg); } }
       .map-reload ha-icon.spin { animation: xplora-spin 0.9s linear infinite; }
 
