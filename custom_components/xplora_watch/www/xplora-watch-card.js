@@ -3216,11 +3216,11 @@ class XploraWatchMapCard extends HTMLElement {
   }
 
   _locationUrl(coords) {
-    // Apple's documented place URL: share the watch's fix, never the phone/map centre.
-    // Match the named-pin parameters observed in Maps sharing. Flow support still needs
-    // physical-device verification; this does not generate an Apple short link or native pin.
+    // Share the watch's fix, never the phone/map centre. Flow's inspected Android parser
+    // recognizes ll, not coordinate, and treats /place as a separate Google-style path.
+    // Use the legacy root URL; iOS Flow compatibility still needs physical-device testing.
     const name = encodeURIComponent(this._deviceName());
-    return `https://maps.apple.com/place?coordinate=${coords.lat},${coords.lng}&name=${name}&map=explore`;
+    return `https://maps.apple.com/?ll=${coords.lat},${coords.lng}&q=${name}`;
   }
 
   async _shareLocation() {

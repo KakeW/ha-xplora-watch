@@ -161,7 +161,7 @@ describe("map card — location sharing", () => {
     const el = mount({ device: DEV }, makeHass());
     el.fill = true;
     el.shadowRoot.querySelector("[data-share]").click();
-    expect(share).toHaveBeenCalledWith({ url: "https://maps.apple.com/place?coordinate=52.53,13.41&name=Dana%20Watch&map=explore" });
+    expect(share).toHaveBeenCalledWith({ url: "https://maps.apple.com/?ll=52.53,13.41&q=Dana%20Watch" });
     await flush();
     expect(el.shadowRoot.querySelector(".map-share-feedback").hidden).toBe(true);
   });
@@ -174,7 +174,7 @@ describe("map card — location sharing", () => {
     hass.states[TRK].attributes.latitude = -33.1234567;
     hass.states[TRK].attributes.longitude = 0;
     el.shadowRoot.querySelector("[data-share]").click();
-    expect(share).toHaveBeenCalledWith({ url: "https://maps.apple.com/place?coordinate=-33.1234567,0&name=Dana%20Watch&map=explore" });
+    expect(share).toHaveBeenCalledWith({ url: "https://maps.apple.com/?ll=-33.1234567,0&q=Dana%20Watch" });
     expect(hass.callService).not.toHaveBeenCalled();
   });
 
@@ -206,7 +206,7 @@ describe("map card — location sharing", () => {
     const status = el.shadowRoot.querySelector(".map-share-feedback");
     expect(status.hidden).toBe(false);
     expect(status.textContent).toContain("Jakovalikko ei ole käytettävissä");
-    expect(status.querySelector("a").href).toBe("https://maps.apple.com/place?coordinate=52.53,13.41&name=Dana%20Watch&map=explore");
+    expect(status.querySelector("a").href).toBe("https://maps.apple.com/?ll=52.53,13.41&q=Dana%20Watch");
   });
 
   it("encodes the watch label without allowing extra URL parameters", () => {
@@ -215,10 +215,10 @@ describe("map card — location sharing", () => {
     const el = mount({ device: DEV, title: "Ääni & paikka #1" }, makeHass());
     el.shadowRoot.querySelector("[data-share]").click();
     const url = new URL(share.mock.calls[0][0].url);
-    expect(url.searchParams.get("name")).toBe("Ääni & paikka #1");
-    expect(url.searchParams.get("coordinate")).toBe("52.53,13.41");
-    expect(url.searchParams.get("map")).toBe("explore");
-    expect([...url.searchParams.keys()]).toEqual(["coordinate", "name", "map"]);
+    expect(url.pathname).toBe("/");
+    expect(url.searchParams.get("q")).toBe("Ääni & paikka #1");
+    expect(url.searchParams.get("ll")).toBe("52.53,13.41");
+    expect([...url.searchParams.keys()]).toEqual(["ll", "q"]);
     expect(url.hash).toBe("");
   });
 
