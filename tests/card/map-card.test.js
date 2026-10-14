@@ -161,13 +161,14 @@ describe("map card — location sharing", () => {
     select.dispatchEvent(new Event("change", { bubbles: true }));
   }
 
-  it("offers exactly three test formats in both inline and fullscreen views", () => {
+  it("offers GPS text by default with both map links retained in inline and fullscreen views", () => {
     const el = mount({ device: DEV }, makeHass());
     for (const fill of [false, true]) {
       el.fill = fill;
       const select = el.shadowRoot.querySelector("[data-share-format]");
-      expect([...select.options].map(o => o.value)).toEqual(["apple", "google", "text"]);
-      expect(select.value).toBe("apple");
+      expect([...select.options].map(o => o.value)).toEqual(["text", "apple", "google"]);
+      expect(select.value).toBe("text");
+      expect(select.closest("label").textContent).not.toContain("(test)");
     }
   });
 
@@ -197,12 +198,12 @@ describe("map card — location sharing", () => {
   it("preserves selection across background state updates and sharing cancellation", async () => {
     vi.stubGlobal("navigator", { share: vi.fn(async () => { throw new DOMException("Cancelled", "AbortError"); }) });
     const el = mount({ device: DEV }, makeHass());
-    selectFormat(el, "text");
+    selectFormat(el, "google");
     el.hass = makeHass({ stamp: FRESH_FIX });
-    expect(el.shadowRoot.querySelector("[data-share-format]").value).toBe("text");
+    expect(el.shadowRoot.querySelector("[data-share-format]").value).toBe("google");
     el.shadowRoot.querySelector("[data-share]").click();
     await flush();
-    expect(el.shadowRoot.querySelector("[data-share-format]").value).toBe("text");
+    expect(el.shadowRoot.querySelector("[data-share-format]").value).toBe("google");
   });
 
   it("does not offer the format selector without coordinates", () => {
@@ -215,6 +216,7 @@ describe("map card — location sharing", () => {
     vi.stubGlobal("navigator", { share });
     const el = mount({ device: DEV }, makeHass());
     el.fill = true;
+    selectFormat(el, "apple");
     el.shadowRoot.querySelector("[data-share]").click();
     expect(share).toHaveBeenCalledWith({ url: "https://maps.apple.com/?ll=52.53,13.41&q=Dana%20Watch" });
     await flush();
@@ -229,7 +231,7 @@ describe("map card — location sharing", () => {
     hass.states[TRK].attributes.latitude = -33.1234567;
     hass.states[TRK].attributes.longitude = 0;
     el.shadowRoot.querySelector("[data-share]").click();
-    expect(share).toHaveBeenCalledWith({ url: "https://maps.apple.com/?ll=-33.1234567,0&q=Dana%20Watch" });
+    expect(share).toHaveBeenCalledWith({ text: "-33.1234567,0" });
     expect(hass.callService).not.toHaveBeenCalled();
   });
 
@@ -268,6 +270,7 @@ describe("map card — location sharing", () => {
     const share = vi.fn(async () => {});
     vi.stubGlobal("navigator", { share });
     const el = mount({ device: DEV, title: "Ääni & paikka #1" }, makeHass());
+    selectFormat(el, "apple");
     el.shadowRoot.querySelector("[data-share]").click();
     const url = new URL(share.mock.calls[0][0].url);
     expect(url.pathname).toBe("/");
@@ -275,6 +278,19 @@ describe("map card — location sharing", () => {
     expect(url.searchParams.get("ll")).toBe("52.53,13.41");
     expect([...url.searchParams.keys()]).toEqual(["ll", "q"]);
     expect(url.hash).toBe("");
+  });
+
+  it("resets to GPS text in a newly opened card with Finnish labels and no test marking", () => {
+    const hass = makeHass();
+    hass.locale.language = "fi";
+    const first = mount({ device: DEV }, hass);
+    selectFormat(first, "apple");
+    first.remove();
+    const reopened = mount({ device: DEV }, hass);
+    const select = reopened.shadowRoot.querySelector("[data-share-format]");
+    expect(select.value).toBe("text");
+    expect(select.selectedOptions[0].textContent).toBe("GPS-koordinaatit (teksti)");
+    expect(select.closest("label").textContent).not.toContain("(testi)");
   });
 
   it("does not treat cancellation as an error", async () => {

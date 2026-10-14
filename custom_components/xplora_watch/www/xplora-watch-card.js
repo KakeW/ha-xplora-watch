@@ -2956,7 +2956,7 @@ class XploraWatchMapCard extends HTMLElement {
     this._autoRefreshDone = false; // guard so "refresh on render" fires once per card instance
     this._reloading = false; // a reload is in flight (drives the spinner + guards a double press)
     this._shareFeedback = "";
-    this._shareFormat = "apple";
+    this._shareFormat = "text";
     this._popup = new CardPopupHost(this.shadowRoot, () => this._hass);
   }
 
@@ -3189,11 +3189,11 @@ class XploraWatchMapCard extends HTMLElement {
       </div>`;
 
     const shareFormatHtml = coords ? `<label class="map-share-format">
-      <span>${this._shareText("Jakomuoto (testi)", "Share format (test)")}</span>
+      <span>${this._shareText("Jakomuoto", "Share format")}</span>
       <select data-share-format>
+        <option value="text"${this._shareFormat === "text" ? " selected" : ""}>${this._shareText("GPS-koordinaatit (teksti)", "GPS coordinates (text)")}</option>
         <option value="apple"${this._shareFormat === "apple" ? " selected" : ""}>Apple Maps (${this._shareText("linkki", "link")})</option>
         <option value="google"${this._shareFormat === "google" ? " selected" : ""}>Google Maps (${this._shareText("linkki", "link")})</option>
-        <option value="text"${this._shareFormat === "text" ? " selected" : ""}>${this._shareText("GPS-koordinaatit (teksti)", "GPS coordinates (text)")}</option>
       </select></label>` : "";
     this._card.innerHTML = `${this._headerHtml(trk)}${bannerHtml}${shareFormatHtml}<div class="map-share-feedback" role="status"${this._shareFeedback && coords ? "" : " hidden"}>${this._esc(this._shareFeedback)} <a data-share-fallback target="_blank" rel="noopener noreferrer">${this._shareText("Avaa Apple Kartoissa", "Open in Apple Maps")}</a></div><div class="map-body"></div>`;
 

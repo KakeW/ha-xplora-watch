@@ -36,14 +36,15 @@ The bundled Lovelace overview card surfaces a watch's online/charging state, bat
 location, steps, XCoins, unread messages, alarms, silent times and safe-zone status at a glance —
 tap the location row for a live map, or the **Location history** row for a full day-by-day track:
 
-The current-location map's **Share location** button shares an Apple Maps coordinate link through
+The current-location map's **Share location** button shares GPS coordinates as plain text through
 the device's native share sheet when supported. It uses the watch's last reported position, not
 your phone's location; check the location age in the map banner. If native sharing is unavailable,
-the card offers an Apple Maps link so you can share from Maps instead. Receiving the shared link
-in Bosch eBike Flow still needs verification on a physical iPhone.
+the card offers an Apple Maps link so you can share from Maps instead. A user verified GPS-text
+sharing into Bosch eBike Flow on iPhone; direct Apple Maps and Google Maps link sharing did not
+produce a destination in that test. This is a device-test result, not a guarantee for every app version.
 
-For sharing compatibility tests, the map offers a **Share format (test)** selector: Apple Maps
-link (default), Google Maps link, or GPS coordinates as plain text. Select a format, then tap the
+The map offers a **Share format** selector: GPS coordinates as plain text (default), Apple Maps
+link, or Google Maps link. Select a format, then tap the
 share icon and choose the receiving app. The selection lasts for the current map-card instance.
 
 <p>
