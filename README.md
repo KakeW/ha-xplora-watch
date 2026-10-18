@@ -34,7 +34,8 @@ zones and more, built to keep your Xplora account **safe from rate-limit bans**.
 
 The bundled Lovelace overview card surfaces a watch's online/charging state, battery, last-known
 location, steps, XCoins, unread messages, alarms, silent times and safe-zone status at a glance —
-tap the location row for a live map, or the **Location history** row for a full day-by-day track:
+tap the location row for a live map, the **Location history** row for a full day-by-day track, or
+**Call log** for recent call and watch power events:
 
 The current-location map's **Share location** button shares GPS coordinates as plain text through
 the device's native share sheet when supported. It uses the watch's last reported position, not

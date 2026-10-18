@@ -2322,6 +2322,27 @@ class XploraWatchOverviewCard extends HTMLElement {
           })()
         : "";
 
+    // The message sensor also carries Xplora system records (calls and watch power events). Keep
+    // this separate from the chat tile: opening the log should never mark chat messages as read.
+    const messageEnt = st("messages");
+    const activityRow = this._usable(messageEnt)
+      ? (() => {
+          const entries = messageEnt.attributes && messageEnt.attributes.list;
+          const count = Array.isArray(entries)
+            ? entries.filter((item) => ["CALL_LOG", "POWER_ON", "POWER_OFF"].includes(item && item.type)).length
+            : null;
+          const sub = count === null ? "Recent calls and watch events" : `${count} event${count === 1 ? "" : "s"}`;
+          return `<button class="row" data-call-log="${this._esc(map.messages)}">
+               <ha-icon class="row-icon" icon="mdi:phone-log"></ha-icon>
+               <div class="row-text">
+                 <div class="row-main">Call log</div>
+                 <div class="row-sub">${this._esc(sub)}</div>
+               </div>
+               <ha-icon class="row-chevron" icon="mdi:chevron-right"></ha-icon>
+             </button>`;
+        })()
+      : "";
+
     const tiles = XploraWatchOverviewCard.TILES.map((t) => {
       const s = st(t.role);
       if (!this._usable(s)) return "";
@@ -2363,6 +2384,7 @@ class XploraWatchOverviewCard extends HTMLElement {
       </div>
       ${location}
       ${historyRow}
+      ${activityRow}
       ${tiles ? `<div class="grid">${tiles}</div>` : ""}`;
 
     this._card.querySelectorAll("[data-more]").forEach((el) => {
@@ -2389,6 +2411,16 @@ class XploraWatchOverviewCard extends HTMLElement {
         // on first open if nothing is cached, so no pre-refresh is needed here.
         this._popup.open(() => {
           const c = document.createElement("xplora-watch-chat-card");
+          c.setConfig({ entity });
+          return c;
+        });
+      });
+    });
+    this._card.querySelectorAll("[data-call-log]").forEach((el) => {
+      const entity = el.getAttribute("data-call-log");
+      el.addEventListener("click", () => {
+        this._popup.open(() => {
+          const c = document.createElement("xplora-watch-call-log-card");
           c.setConfig({ entity });
           return c;
         });
@@ -4617,6 +4649,161 @@ window.customCards.push({
   type: "xplora-watch-chat-card",
   name: "Xplora Watch Chat",
   description: "View a watch's chat history and send a message (text, with voice/image/video attachments shown).",
+  preview: true,
+});
+
+/** A per-watch view of call and power events returned alongside the Xplora chat records. */
+class XploraWatchCallLogCard extends HTMLElement {
+  constructor() {
+    super();
+    this.attachShadow({ mode: "open" });
+    this._hass = null;
+    this._config = null;
+    this._sig = "";
+    this._fetching = false;
+    this._requested = false;
+    this._error = false;
+  }
+
+  setConfig(config) {
+    if (!config || !config.entity) throw new Error("xplora-watch-call-log-card: an `entity` is required.");
+    this._config = config;
+    this._render();
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    if (!this._config) return;
+    const state = hass.states[this._config.entity];
+    const sig = state ? `${state.last_updated}|${state.attributes.media_revision || 0}` : "missing";
+    if (sig !== this._sig) {
+      this._sig = sig;
+      this._render();
+    }
+    this._maybeFetch();
+  }
+
+  get hass() { return this._hass; }
+
+  _state() { return this._hass && this._config ? this._hass.states[this._config.entity] : undefined; }
+  _attrs() { return (this._state() || {}).attributes || {}; }
+  _esc(value) { return String(value == null ? "" : value).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]); }
+  _locale() { return (this._hass && this._hass.locale && this._hass.locale.language) || navigator.language || "en"; }
+  _events() {
+    const list = this._attrs().list;
+    return (Array.isArray(list) ? list : [])
+      .filter((item) => item && ["CALL_LOG", "POWER_ON", "POWER_OFF"].includes(item.type))
+      .slice()
+      .sort((a, b) => this._stamp(b) - this._stamp(a));
+  }
+  _stamp(item) {
+    const raw = item && (item.create != null ? item.create : item.data && item.data.tm);
+    let value = Number(raw);
+    if (!Number.isFinite(value)) return 0;
+    if (value > 0 && value < 1e12) value *= 1000;
+    return value;
+  }
+  _time(item) {
+    const stamp = this._stamp(item);
+    return stamp ? new Date(stamp).toLocaleString(this._locale()) : "Time unavailable";
+  }
+  _title(item) {
+    if (item.type === "POWER_ON") return "Watch switched on";
+    if (item.type === "POWER_OFF") return "Watch switched off";
+    const name = item.data && item.data.call_name;
+    return name ? `Call · ${name}` : "Call";
+  }
+  _details(item) {
+    if (item.type !== "CALL_LOG") return "";
+    const data = item.data || {};
+    const details = [];
+    // call_time is displayed as the API supplied it: the integration has no verified unit mapping.
+    if (data.call_time !== null && data.call_time !== undefined && data.call_time !== "") {
+      details.push(`Duration (API value): ${data.call_time}`);
+    }
+    if (data.call_type !== null && data.call_type !== undefined && data.call_type !== "") {
+      details.push(`Call type: ${data.call_type}`);
+    }
+    return details.join(" · ");
+  }
+  _maybeFetch() {
+    const attrs = this._attrs();
+    if (this._requested || !attrs.entry_id || !attrs.wuid) return;
+    this._requested = true;
+    this._refresh();
+  }
+  async _refresh() {
+    const attrs = this._attrs();
+    if (!this._hass || !attrs.entry_id || !attrs.wuid || this._fetching) return;
+    this._fetching = true;
+    this._error = false;
+    this._render();
+    try {
+      await this._hass.callService(DOMAIN, CHAT_SERVICE.READ, { entity_id: [this._config.entity] }, undefined, false);
+    } catch (err) {
+      this._error = true;
+      console.error("xplora-watch-call-log-card: refresh failed", err);
+    } finally {
+      this._fetching = false;
+      this._render();
+    }
+  }
+  _render() {
+    if (!this.shadowRoot) return;
+    const events = this._events();
+    const loaded = Array.isArray(this._attrs().list);
+    this.shadowRoot.innerHTML = `
+      <style>
+        :host { display:block; }
+        ha-card { overflow:hidden; }
+        .head { display:flex; align-items:center; gap:12px; padding:16px; border-bottom:1px solid var(--divider-color); }
+        .head ha-icon { color:var(--primary-color); --mdc-icon-size:24px; }
+        .title { flex:1; min-width:0; font-size:1.15rem; font-weight:500; }
+        button { display:inline-flex; align-items:center; justify-content:center; min-width:44px; min-height:44px; border:0; border-radius:50%; background:none; color:var(--primary-text-color); cursor:pointer; }
+        button:hover { background:var(--secondary-background-color); }
+        button[disabled] { opacity:.5; cursor:default; }
+        .spin { animation: spin .9s linear infinite; }
+        .list { list-style:none; margin:0; padding:0; }
+        .item { display:flex; gap:14px; padding:14px 16px; border-bottom:1px solid var(--divider-color); }
+        .item:last-child { border-bottom:0; }
+        .item ha-icon { flex:0 0 auto; margin-top:2px; color:var(--primary-color); --mdc-icon-size:22px; }
+        .body { flex:1; min-width:0; }
+        .main { font-weight:500; overflow-wrap:anywhere; }
+        .time,.detail,.scope { margin-top:4px; color:var(--secondary-text-color); font-size:.88rem; }
+        .empty { padding:32px 20px; text-align:center; color:var(--secondary-text-color); }
+        .scope { padding:12px 16px; border-top:1px solid var(--divider-color); }
+        @keyframes spin { to { transform:rotate(360deg); } }
+      </style>
+      <ha-card>
+        <div class="head"><ha-icon icon="mdi:phone-log"></ha-icon><div class="title">Call log</div>
+          <button class="refresh" aria-label="Refresh" title="Refresh" ${this._fetching ? "disabled" : ""}>
+            <ha-icon class="${this._fetching ? "spin" : ""}" icon="mdi:refresh"></ha-icon>
+          </button>
+        </div>
+        ${this._error && !events.length ? `<div class="empty">Could not load call events. Use refresh to try again.</div>` : events.length ? `<ul class="list">${events.map((item) => {
+          const icon = item.type === "CALL_LOG" ? "mdi:phone" : item.type === "POWER_ON" ? "mdi:power" : "mdi:power-off";
+          const details = this._details(item);
+          return `<li class="item"><ha-icon icon="${icon}"></ha-icon><div class="body">
+            <div class="main">${this._esc(this._title(item))}</div>
+            <div class="time">${this._esc(this._time(item))}</div>
+            ${details ? `<div class="detail">${this._esc(details)}</div>` : ""}
+          </div></li>`;
+        }).join("")}</ul>` : `<div class="empty">${this._fetching || !loaded ? "Loading recent events…" : "No call or power events in the fetched message window."}</div>`}
+        <div class="scope">The log uses the most recent records returned by Xplora. Its size follows the integration’s message-count setting.</div>
+      </ha-card>`;
+    const refresh = this.shadowRoot.querySelector(".refresh");
+    if (refresh) refresh.addEventListener("click", () => this._refresh());
+  }
+}
+
+if (!customElements.get("xplora-watch-call-log-card")) {
+  customElements.define("xplora-watch-call-log-card", XploraWatchCallLogCard);
+}
+
+window.customCards.push({
+  type: "xplora-watch-call-log-card",
+  name: "Xplora Watch Call Log",
+  description: "View recent call and watch power events for one watch.",
   preview: true,
 });
 

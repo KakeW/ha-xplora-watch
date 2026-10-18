@@ -17,6 +17,12 @@ Tapping the location row opens a live map with the watch's last-known position a
 Tapping the **Location history** row opens a date bar and a map track of where the watch has been
 on a given day — see [Location history](location-history.md).
 
+When the watch's `*_message` sensor is enabled, the overview also shows **Call log**. It filters
+the recent records returned by Xplora to calls and watch power-on/power-off events. The log refreshes
+through the existing message read service; its history is therefore limited by the integration's
+message-count setting (10 by default, configurable up to 100). Xplora's `call_time` and `call_type`
+values are shown as supplied by the API because their units/codes have not yet been confirmed.
+
 ## Alarms & Silent Times card
 
 Point the bundled alarms/silent-times card at one of the list sensors from
@@ -129,6 +135,21 @@ soon as each receipt succeeds.
 > The `*_message` sensor is **disabled by default** — enable it on the watch's device page before
 > adding the card. The card shows a placeholder until the sensor is available, and fetches the
 > thread automatically the first time it opens with nothing cached.
+
+## Call log card
+
+The overview's **Call log** row opens a per-watch list of recent call records and watch power-on /
+power-off events. To place it directly on a dashboard, use the same watch's message sensor:
+
+```yaml
+type: custom:xplora-watch-call-log-card
+entity: sensor.kid_one_watch_message
+```
+
+The card fetches the records on first open and has a refresh button. It uses the integration's
+configured message-count limit, so raise that setting if you need a larger recent window. The API
+provides `call_name`, `call_time`, and `call_type`; until their meaning is confirmed from real call
+records, the card displays the latter two as raw API values.
 
 ![Chat card](../images/chat_card.png)
 
