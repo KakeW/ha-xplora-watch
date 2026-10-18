@@ -26,7 +26,7 @@ async def test_concurrent_same_signature_runs_one_fetch(
     started = asyncio.Event()
     release = asyncio.Event()
 
-    async def fake_fetch(targets: list[str] | None, force_functions: bool) -> dict[str, Any]:
+    async def fake_fetch(targets: list[str] | None, force_functions: bool, include_chats: bool) -> dict[str, Any]:
         nonlocal calls
         calls += 1
         started.set()
@@ -61,7 +61,7 @@ async def test_different_force_functions_are_separate_but_serialized(
     release_plain = asyncio.Event()
     forced_started = asyncio.Event()
 
-    async def fake_fetch(targets: list[str] | None, force_functions: bool) -> dict[str, Any]:
+    async def fake_fetch(targets: list[str] | None, force_functions: bool, include_chats: bool) -> dict[str, Any]:
         seen.append(force_functions)
         if force_functions:
             forced_started.set()
@@ -97,7 +97,7 @@ async def test_different_targets_are_separate_but_serialized(
     release_first = asyncio.Event()
     second_started = asyncio.Event()
 
-    async def fake_fetch(targets: list[str] | None, force_functions: bool) -> dict[str, Any]:
+    async def fake_fetch(targets: list[str] | None, force_functions: bool, include_chats: bool) -> dict[str, Any]:
         target = tuple(targets) if targets else None
         seen.append(target)
         if target == (DEFAULT_WUID,):
@@ -124,6 +124,43 @@ async def test_different_targets_are_separate_but_serialized(
     assert coord._inflight_updates == {}
 
 
+async def test_chat_refresh_does_not_coalesce_with_lean_update(
+    coordinator_with_data: XploraDataUpdateCoordinator,
+) -> None:
+    """A manual chat-cache update must not join a simultaneous lean scheduled poll."""
+    coord = coordinator_with_data
+    seen: list[bool] = []
+    poll_started = asyncio.Event()
+    release_poll = asyncio.Event()
+    chat_refresh_started = asyncio.Event()
+
+    async def fake_fetch(targets: list[str] | None, force_functions: bool, include_chats: bool) -> dict[str, Any]:
+        seen.append(include_chats)
+        if include_chats:
+            chat_refresh_started.set()
+        else:
+            poll_started.set()
+            await release_poll.wait()
+        return {"include_chats": include_chats}
+
+    coord._fetch_and_store_xplora_data = fake_fetch  # type: ignore[method-assign]
+
+    poll = asyncio.create_task(coord.async_update_xplora_data([DEFAULT_WUID]))
+    await poll_started.wait()
+    refresh = asyncio.create_task(coord.async_update_xplora_data([DEFAULT_WUID], include_chats=True))
+    await asyncio.sleep(0)
+    assert seen == [False]
+
+    release_poll.set()
+    await chat_refresh_started.wait()
+    poll_result, refresh_result = await asyncio.gather(poll, refresh)
+
+    assert seen == [False, True]
+    assert poll_result == {"include_chats": False}
+    assert refresh_result == {"include_chats": True}
+    assert coord._inflight_updates == {}
+
+
 async def test_new_data_path_bypasses_coalescer(
     coordinator_with_data: XploraDataUpdateCoordinator,
 ) -> None:
@@ -131,7 +168,7 @@ async def test_new_data_path_bypasses_coalescer(
     coord = coordinator_with_data
     called = False
 
-    async def fake_fetch(targets: list[str] | None, force_functions: bool) -> dict[str, Any]:  # pragma: no cover
+    async def fake_fetch(targets: list[str] | None, force_functions: bool, include_chats: bool) -> dict[str, Any]:  # pragma: no cover
         nonlocal called
         called = True
         return {}

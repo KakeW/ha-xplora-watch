@@ -28,7 +28,7 @@ export function chat(
 
 // A minimal `hass` exposing one message sensor. `lastUpdated` drives the card's re-render guard;
 // `state` deliberately stays constant so tests prove attribute-only updates still re-render.
-export function makeHass(messages, { lastUpdated = "2026-06-27T10:00:00Z", locale = "en", callService } = {}) {
+export function makeHass(messages, { lastUpdated = "2026-06-27T10:00:00Z", locale = "en", callService, refreshOnRender = false } = {}) {
   return {
     states: {
       [MESSAGE_ENTITY]: {
@@ -41,6 +41,7 @@ export function makeHass(messages, { lastUpdated = "2026-06-27T10:00:00Z", local
           wuid: "watch1",
           account_user_id: "acct1",
           friendly_name: "Dana Watch Message",
+          refresh_on_card_render: refreshOnRender,
           list: messages,
         },
       },

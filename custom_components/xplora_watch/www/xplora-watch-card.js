@@ -2407,8 +2407,8 @@ class XploraWatchOverviewCard extends HTMLElement {
     this._card.querySelectorAll("[data-chat]").forEach((el) => {
       const entity = el.getAttribute("data-chat");
       el.addEventListener("click", () => {
-        // The chat card reads `entry_id`/`wuid` from the message sensor and auto-fetches the thread
-        // on first open if nothing is cached, so no pre-refresh is needed here.
+        // The chat card reads the current message thread from the sensor cache; opening it does not
+        // issue a network request.
         this._popup.open(() => {
           const c = document.createElement("xplora-watch-chat-card");
           c.setConfig({ entity });
@@ -3573,7 +3573,6 @@ class XploraWatchChatCard extends HTMLElement {
     this._sig = ""; // signature of the rendered message list, to skip needless re-renders
     this._busy = false; // a send is in flight
     this._refreshing = false; // a read/refresh is in flight
-    this._autoFetched = false; // whether the one-shot "fetch on first open" already ran
     this._pending = []; // optimistically-rendered sent messages awaiting the server echo
     this._localSeq = 0; // monotonic id source for optimistic messages
     this._forceScroll = false; // force a scroll-to-bottom on the next render (set right after a send)
@@ -3657,7 +3656,8 @@ class XploraWatchChatCard extends HTMLElement {
       this._sig = sig;
       this._render();
     }
-    this._maybeAutoFetch();
+    // Render only the integration's local message cache. Network fetches are initiated by the
+    // explicit refresh button, a push event, or a manual watch update.
   }
 
   get hass() {
@@ -3794,23 +3794,6 @@ class XploraWatchChatCard extends HTMLElement {
   }
 
   /* -------------------------------------------------------------- services */
-
-  // Fetch messages once when the card first opens with nothing cached, so an empty card fills in
-  // without the user having to hit refresh. `read_message` also downloads any media attachments.
-  _maybeAutoFetch() {
-    if (this._autoFetched) return;
-    const a = this._attrs();
-    if (!a.wuid || !a.entry_id) return; // sensor not ready yet
-    this._autoFetched = true;
-    // Always fill an empty card on first open. Additionally, when the user enabled "refresh on
-    // render", re-pull the thread on show even if something is cached -- deduped so a duplicate
-    // chat card (or another card hitting read_message) in the same view doesn't repeat the call.
-    if (this._messages().length === 0) {
-      this._refresh();
-    } else if (refreshOnRenderEnabled(this._stateObj())) {
-      trackInflight(`${CHAT_SERVICE.READ}|${a.entry_id}|${a.wuid}`, () => this._refresh());
-    }
-  }
 
   async _refresh() {
     if (!this._hass || this._refreshing) return;
@@ -4661,7 +4644,6 @@ class XploraWatchCallLogCard extends HTMLElement {
     this._config = null;
     this._sig = "";
     this._fetching = false;
-    this._requested = false;
     this._error = false;
   }
 
@@ -4680,7 +4662,8 @@ class XploraWatchCallLogCard extends HTMLElement {
       this._sig = sig;
       this._render();
     }
-    this._maybeFetch();
+    // The log is a filtered view of the already-cached message sensor. Only its refresh button
+    // performs a network read.
   }
 
   get hass() { return this._hass; }
@@ -4725,12 +4708,6 @@ class XploraWatchCallLogCard extends HTMLElement {
       details.push(`Call type: ${data.call_type}`);
     }
     return details.join(" · ");
-  }
-  _maybeFetch() {
-    const attrs = this._attrs();
-    if (this._requested || !attrs.entry_id || !attrs.wuid) return;
-    this._requested = true;
-    this._refresh();
   }
   async _refresh() {
     const attrs = this._attrs();

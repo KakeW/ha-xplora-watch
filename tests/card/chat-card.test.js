@@ -244,8 +244,17 @@ describe("incremental rendering", () => {
   });
 });
 
-describe("refresh button", () => {
-  it("calls read_message for the configured watch", () => {
+describe("cache-first rendering and explicit refresh", () => {
+  it("does not fetch messages when the card opens, even when the cache is empty", () => {
+    const calls = [];
+    mountChat([], {
+      callService: async (...a) => calls.push(a),
+      refreshOnRender: true,
+    });
+    expect(calls).toEqual([]);
+  });
+
+  it("calls read_message only when the user presses refresh", () => {
     const calls = [];
     const el = mountChat([chat("m1", { text: "hi" })], { callService: async (...a) => calls.push(a) });
 

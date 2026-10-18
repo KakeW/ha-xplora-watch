@@ -299,9 +299,8 @@ async def test_unregistered_consumers_still_seed_once(hass: HomeAssistant) -> No
 
 
 async def test_poll_never_fetches_chats(hass: HomeAssistant) -> None:
-    """The `see` / periodic-poll path never issues the `Chats` request -- even with the Message
-    sensor ENABLED. Chats are owned exclusively by the standalone `read_message` service now, so the
-    location/status refresh stays decoupled from them."""
+    """Scheduled polls skip `Chats` even with the Message sensor ENABLED; startup/manual refreshes
+    and push events keep the local chat cache warm without adding a request to every poll."""
     entry = _entry(hass, SCAN_INTERVAL_OFF)
     _register_entity(hass, entry, Platform.SENSOR, f"kid_{ATTR_WATCH}_{SENSOR_MESSAGE}_{DEFAULT_WUID}_uid", disabled=False)
 

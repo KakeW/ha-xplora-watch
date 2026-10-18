@@ -130,11 +130,8 @@ async def test_extra_state_attributes_message_exposes_ids_when_no_chats_yet(
 ) -> None:
     """Even with no chats fetched yet (empty dict), SENSOR_MESSAGE still exposes the static ids.
 
-    Regression for the cold-start deadlock: chats are fetched only by the `read_message` service,
-    which the chat card can only call once it can read `entry_id`/`wuid` from this sensor. Gating
-    those ids on a non-empty chat dict meant the card could never issue the first fetch (no chats
-    -> no ids -> can't fetch -> no chats). The ids must be present from the start; the chat payload
-    (`list`) is simply absent until the first `read_message`.
+    The card needs these ids for its explicit refresh action. Its normal render path is cache-only,
+    but the chat payload (`list`) can be absent before initial setup or a manual/push refresh.
     """
     coordinator_with_data.data[DEFAULT_WUID][SENSOR_MESSAGE] = {}
     sensor = _make_sensor(hass, mock_config_entry_phone, coordinator_with_data, SENSOR_MESSAGE)

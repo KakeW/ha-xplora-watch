@@ -14,6 +14,7 @@ some watches were skipped.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -51,6 +52,7 @@ from .const import (
     ATTR_SERVICE_REBOOT,
     ATTR_SERVICE_REFRESH_FUNCTIONS,
     ATTR_SERVICE_SEE,
+    SENSOR_MESSAGE,
     ATTR_SERVICE_SEND_MSG,
     ATTR_SERVICE_SET_ALARM_ENABLED,
     ATTR_SERVICE_SET_SILENT_ENABLED,
@@ -78,6 +80,8 @@ from .helper import (
 from .log import Log
 from .pyxplora_api.exception_classes import AuthError, RateLimitError
 from .pyxplora_api.exception_classes import ConnectionError as XploraConnectionError
+
+_LOGGER = logging.getLogger(__name__)
 from .pyxplora_api.pyxplora_api_async import FetchError
 from .pyxplora_api.status import ChatEmoticonType, NormalStatus
 
@@ -773,7 +777,14 @@ class XploraSeeService(XploraService):
             coordinator = account.coordinator
             account.log.debug("%s: update all information: %s", coordinator.controller.getUserName(), ", ".join(account.wuids))
             # `async_update_xplora_data` recovers a stale token internally, so `recover=False`.
-            await account.call("Update", None, lambda: coordinator.async_update_xplora_data(account.wuids), recover=False)
+            await account.call(
+                "Update", None, lambda: coordinator.async_update_xplora_data(account.wuids, include_chats=True), recover=False
+            )
+            if account.broken:
+                return
+            media_service = XploraMessageSensorUpdateService(self._hass, account.entry_id)
+            for watch in account.wuids:
+                media_service.async_schedule_cached_media(coordinator, watch)
 
         await self._fan_out(data, ATTR_SERVICE_SEE, body)
 
@@ -884,7 +895,7 @@ class XploraMessageSensorUpdateService(XploraService):
     """Create a service that can be used to read messages from Watch."""
 
     async def async_prefetch_watch(self, coordinator: XploraDataUpdateCoordinator, watch: str, chats: dict[str, Any] | None = None) -> None:
-        """Publish a push-triggered thread before downloading its media; never mark read."""
+        """Publish an already-fetched thread before downloading its media; never mark read."""
         if chats is None:
             resolved = resolve(coordinator._entry.options)
             chats = await coordinator._with_recovery(lambda: coordinator.message_data(watch, resolved.message, resolved.remove_message))
@@ -898,6 +909,21 @@ class XploraMessageSensorUpdateService(XploraService):
             if fetch:
                 if await fetch(coordinator, watch, chat.get("msgId")):
                     self._publish_media(coordinator, watch)
+
+    def async_schedule_cached_media(self, coordinator: XploraDataUpdateCoordinator, watch: str) -> None:
+        """Warm attachment files after a full refresh without holding up its result."""
+        chats = ((coordinator.data or {}).get(watch) or {}).get(SENSOR_MESSAGE) or {}
+        self._hass.async_create_background_task(
+            self._prefetch_best_effort(coordinator, watch, chats), f"Xplora media cache {watch}"
+        )
+
+    async def _prefetch_best_effort(
+        self, coordinator: XploraDataUpdateCoordinator, watch: str, chats: dict[str, Any]
+    ) -> None:
+        try:
+            await self.async_prefetch_watch(coordinator, watch, chats=chats)
+        except Exception as error:  # noqa: BLE001 -- metadata cache is already fresh; media can retry
+            _LOGGER.warning("Xplora media cache update failed for watch ...%s (%s)", watch[25:], type(error).__name__)
 
     @staticmethod
     def _publish_media(coordinator: XploraDataUpdateCoordinator, watch: str) -> None:

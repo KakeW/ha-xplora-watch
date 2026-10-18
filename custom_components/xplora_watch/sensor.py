@@ -281,10 +281,8 @@ class XploraSensor(XploraBaseEntity, SensorEntity):
             # alarm/silent list sensors), and `account_user_id` (the logged-in user's id) lets the
             # card tell outgoing messages (we sent them, so `sender.id` is our id) from incoming
             # ones -- see `sendText`'s "sender is login User". They must NOT be gated on a non-empty
-            # chat dict: chats are fetched only by the `read_message` service, which the card can
-            # only call once it has these ids -- gating them deadlocked a cold start (no chats -> no
-            # ids -> the card can't fetch -> still no chats). The chat payload (`list`, ...) is
-            # merged in once `read_message` has populated it.
+            # chat dict: the cache can be empty before initial setup or a manual/push refresh, and
+            # the card needs these ids for its explicit refresh action.
             messages = ((self.coordinator.data or {}).get(self.watch_uid) or {}).get(SENSOR_MESSAGE) or {}
             return dict(
                 data,

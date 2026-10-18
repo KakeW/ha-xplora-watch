@@ -162,10 +162,20 @@ class XploraButton(XploraBaseEntity, ButtonEntity):
         if key == BUTTON_UPDATE:
             self._log.debug("Update (refresh) pressed for watch ...%s", self.watch_uid[25:])
             try:
-                await self.coordinator.async_update_xplora_data([self.watch_uid])
+                await self.coordinator.async_update_xplora_data([self.watch_uid], include_chats=True)
             except Exception as err:  # noqa: BLE001 -- record the failure for the UI, then surface it
                 self._record_update_error()
                 raise HomeAssistantError(f"Update failed: {err}") from err
+            # Metadata is already in the coordinator cache; warm attachments asynchronously so they
+            # do not keep the manual status refresh or the next card open waiting.
+            try:
+                from .services import XploraMessageSensorUpdateService
+
+                XploraMessageSensorUpdateService(self.hass, self._config_entry.entry_id).async_schedule_cached_media(
+                    self.coordinator, self.watch_uid
+                )
+            except Exception as err:  # noqa: BLE001 -- missing media does not invalidate the watch refresh
+                self._log.warning("Message media cache refresh failed (%s)", type(err).__name__)
             return
 
         # `refresh_functions` re-fetches alarms/silent times/safe zones on demand, bypassing the

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import AsyncMock, patch
+
 from homeassistant.const import CONF_COUNTRY_CODE, CONF_LANGUAGE, CONF_PASSWORD
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -102,3 +104,18 @@ async def test_returns_full_accumulated_data_not_just_refreshed_wuid(
     assert "stale-wuid" in result
     assert DEFAULT_WUID in result
     assert result is coordinator.data
+
+
+async def test_initial_or_manual_update_includes_chat_data(coordinator: XploraDataUpdateCoordinator) -> None:
+    """Initial cache population and an explicit full update pass through the chat-fetch flag."""
+    with (
+        patch.object(coordinator.controller, "setDevices", new=AsyncMock(return_value=[DEFAULT_WUID])),
+        patch.object(coordinator, "data_loop", new=AsyncMock(return_value={})) as data_loop,
+    ):
+        await coordinator._fetch_watch_entry([DEFAULT_WUID])
+        assert data_loop.await_args.kwargs["include_chats"] is True
+
+        coordinator.data = {DEFAULT_WUID: {"existing": True}}
+        data_loop.reset_mock()
+        await coordinator._fetch_watch_entry([DEFAULT_WUID], include_chats=True)
+        assert data_loop.await_args.kwargs["include_chats"] is True

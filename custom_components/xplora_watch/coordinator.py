@@ -195,7 +195,7 @@ class XploraDataUpdateCoordinator(DataUpdateCoordinator):
         # scheduled poll for the same watch(es) -- await the SAME network fan-out instead of each
         # launching their own. This is the authoritative dedup; the cards' render-time guard is now
         # just a UX nicety on top of it. Keyed entries are removed as soon as the fetch settles.
-        self._inflight_updates: dict[tuple[tuple[str, ...] | None, bool], asyncio.Task[dict[str, Any]]] = {}
+        self._inflight_updates: dict[tuple[tuple[str, ...] | None, bool, bool], asyncio.Task[dict[str, Any]]] = {}
         # The fetch pipeline below still uses coordinator instance fields (`self.device`, battery,
         # location, etc.) as scratch state while it awaits network calls. Different request
         # signatures are intentionally not coalesced, but they must not execute that stateful
@@ -561,7 +561,9 @@ class XploraDataUpdateCoordinator(DataUpdateCoordinator):
                 return True
         return False
 
-    async def _fetch_watch_entry(self, targets: list[str] | None, force_functions: bool = False) -> dict[str, Any]:
+    async def _fetch_watch_entry(
+        self, targets: list[str] | None, force_functions: bool = False, include_chats: bool = False
+    ) -> dict[str, Any]:
         """Resolve the target watch UUIDs and fetch their data via `data_loop`.
 
         Extracted out of `async_update_xplora_data` so the `AuthError` recovery path below
@@ -590,14 +592,9 @@ class XploraDataUpdateCoordinator(DataUpdateCoordinator):
             functions = frozenset(fn for fn, consumers in _FUNCTION_CONSUMERS.items() if not self._consumers_all_disabled(consumers))
         else:
             functions = frozenset()
-        # Chats are deliberately NOT part of the regular `see` / periodic-poll cycle: that path only
-        # refreshes the deviceList-derived live status (battery, charging, location, online status,
-        # steps) plus the gated functions/history. Chat messages -- and their voice/video/image media
-        # downloads -- are fetched exclusively by the standalone `read_message` service (which calls
-        # `message_data` directly), so they stay decoupled from the location/status refresh. A plain
-        # update carries the last-known chats forward (see `data_loop`'s `include_chats=False` branch)
-        # instead of issuing the per-watch `Chats` request.
-        include_chats = False
+        # Keep scheduled polls lean, but include the thread on the first load and on explicit manual
+        # refreshes. Push-triggered updates fetch and publish the same cache through message_data().
+        include_chats = include_chats or not self.data
         # Location history is deliberately NOT part of the regular `see` / periodic-poll cycle: a plain
         # update (`force_functions` is False) never issues the `LocHistory` request. It is fetched only
         # on an explicit force -- `async_refresh_functions`, which the card triggers when you open the
@@ -645,12 +642,19 @@ class XploraDataUpdateCoordinator(DataUpdateCoordinator):
         return await self.data_loop(wuids, opts.message, opts.remove_message, include_chats=include_chats, include_history=include_history)
 
     async def async_update_xplora_data(
-        self, targets: list[str] | None = None, new_data: dict | None = None, force_functions: bool = False
+        self,
+        targets: list[str] | None = None,
+        new_data: dict | None = None,
+        force_functions: bool = False,
+        include_chats: bool = False,
     ) -> dict[str, Any]:
         """Fetch data from Xplora.
 
         `force_functions` forces the alarm/silent/safezone fetch regardless of the functions
         poll interval -- used by the on-demand `refresh_functions` path.
+
+        `include_chats` includes the watch's chat/event list in this same refresh. It is enabled for
+        initial setup and explicit manual refreshes, while scheduled polling remains lean.
 
         Concurrent calls sharing the same request signature (`targets` + `force_functions`) are
         coalesced onto a single in-flight network fan-out via `_inflight_updates`: two cards
@@ -672,13 +676,18 @@ class XploraDataUpdateCoordinator(DataUpdateCoordinator):
         # tuple, or None for "all configured watches") so call order doesn't defeat the match; a
         # force_functions fetch is a different signature (it pulls a different data set), so it is
         # never merged with a plain refresh.
-        key = (tuple(sorted(targets)) if targets else None, force_functions)
+        # A full refresh and a lean scheduled poll are different requests: a manual refresh arriving
+        # while a poll is in flight must not accidentally join it and miss the chats fetch.
+        key = (tuple(sorted(targets)) if targets else None, force_functions, include_chats)
         existing = self._inflight_updates.get(key)
         if existing is not None and not existing.done():
-            self._log.debug("Coalescing update onto in-flight request (targets=%s, force_functions=%s)", key[0], force_functions)
+            self._log.debug(
+                "Coalescing update onto in-flight request (targets=%s, force_functions=%s, include_chats=%s)",
+                key[0], force_functions, include_chats
+            )
             return await existing
 
-        task = self.hass.async_create_task(self._run_serialized_update(targets, force_functions))
+        task = self.hass.async_create_task(self._run_serialized_update(targets, force_functions, include_chats))
         # Retrieve the task's result/exception when it settles so a caller cancelled mid-await (e.g.
         # the coordinator's update timeout firing) doesn't leave an "exception never retrieved".
         task.add_done_callback(lambda t: t.cancelled() or t.exception())
@@ -689,14 +698,16 @@ class XploraDataUpdateCoordinator(DataUpdateCoordinator):
             if self._inflight_updates.get(key) is task:
                 self._inflight_updates.pop(key, None)
 
-    async def _run_serialized_update(self, targets: list[str] | None, force_functions: bool) -> dict[str, Any]:
+    async def _run_serialized_update(
+        self, targets: list[str] | None, force_functions: bool, include_chats: bool
+    ) -> dict[str, Any]:
         """Run one stateful coordinator update at a time.
 
         Requests with different signatures remain separate (and therefore keep their own result),
         but wait at this lock before touching the coordinator's shared per-watch scratch fields.
         """
         async with self._update_lock:
-            return await self._fetch_and_store_xplora_data(targets, force_functions)
+            return await self._fetch_and_store_xplora_data(targets, force_functions, include_chats)
 
     async def _with_recovery(self, coro_factory: Callable[[], Awaitable[_T]]) -> _T:
         """Run a controller call through the bounded, single-flight token-recovery ladder.
@@ -814,7 +825,9 @@ class XploraDataUpdateCoordinator(DataUpdateCoordinator):
             return list(self.controller.getWatchUserIDs())
         return []
 
-    async def _init_and_fetch(self, targets: list[str] | None, force_functions: bool) -> dict[str, Any]:
+    async def _init_and_fetch(
+        self, targets: list[str] | None, force_functions: bool, include_chats: bool
+    ) -> dict[str, Any]:
         """One login-gated network fetch, as a unit routed through `_with_recovery`.
 
         `init(forceLogin=False)` is a cheap no-op once the token is valid (its own
@@ -822,9 +835,11 @@ class XploraDataUpdateCoordinator(DataUpdateCoordinator):
         retry costs nothing -- it just guarantees the fetch always runs against a live session.
         """
         await self.init(aiohttp_client.async_get_clientsession(self.hass))
-        return await self._fetch_watch_entry(targets, force_functions=force_functions)
+        return await self._fetch_watch_entry(targets, force_functions=force_functions, include_chats=include_chats)
 
-    async def _fetch_and_store_xplora_data(self, targets: list[str] | None, force_functions: bool) -> dict[str, Any]:
+    async def _fetch_and_store_xplora_data(
+        self, targets: list[str] | None, force_functions: bool, include_chats: bool
+    ) -> dict[str, Any]:
         """Perform the actual network fetch and store the result (one run per request signature).
 
         Split out of `async_update_xplora_data` so the coalescer there can share a single run of
@@ -843,7 +858,9 @@ class XploraDataUpdateCoordinator(DataUpdateCoordinator):
         # "Unexpected error" traceback. Order matters: `XploraConnectionError`/`LoginError`
         # subclass `Error`, so they must precede the generic `Error` clause.
         try:
-            watch_entry.update(await self._with_recovery(lambda: self._init_and_fetch(targets, force_functions)))
+            watch_entry.update(
+                await self._with_recovery(lambda: self._init_and_fetch(targets, force_functions, include_chats))
+            )
         except RateLimitError as err:
             # Never retry a 429 ourselves -- that's the whole point of RateLimitError bypassing the
             # per-field retry loops; a re-auth inside a rate-limit window worsens a ban.
@@ -885,10 +902,9 @@ class XploraDataUpdateCoordinator(DataUpdateCoordinator):
         """Fetch and parse Xplora data.
 
         `include_chats=False` skips the per-watch chat fetch (the `Chats` request) and carries the
-        last-known messages forward. The `see` / periodic-poll path always passes `False`: chats are
-        owned exclusively by the standalone `read_message` service now, so this refresh only touches
-        the deviceList-derived live status (battery, charging, location, online status, steps) plus
-        the gated functions/history. `include_history=True` additionally issues the `LocHistory` request and
+        last-known messages forward. Scheduled polls pass `False` to limit API traffic; initial setup,
+        explicit full refreshes and push events fill the same local chat cache. `include_history=True`
+        additionally issues the `LocHistory` request and
         merges the result into the retained, accumulated location-history store (the bounded slice
         the sensor shows is always read from that store, so a skipped fetch just carries it forward).
         """
@@ -909,9 +925,18 @@ class XploraDataUpdateCoordinator(DataUpdateCoordinator):
                 if isinstance(res_chats, ChatsNew):
                     res_chats = res_chats.to_dict()
                 chats = ChatsNew.from_dict(res_chats).to_dict()
+                # Keep locally confirmed read receipts when a manual full refresh replaces the
+                # cached chat window with the server response.
+                acknowledged = {
+                    str(item.get("msgId"))
+                    for item in ((self.data or {}).get(wuid, {}).get(SENSOR_MESSAGE) or {}).get("list") or []
+                    if item.get(ATTR_CHAT_READ_RECEIPT_SENT)
+                }
+                for item in chats.get("list") or []:
+                    if str(item.get("msgId")) in acknowledged:
+                        item[ATTR_CHAT_READ_RECEIPT_SENT] = True
             else:
-                # Chats are not fetched here -> reuse the last-known messages (updated only by the
-                # `read_message` service) instead of issuing a fresh request.
+                # Lean scheduled polls reuse the last-known messages rather than issuing a Chats request.
                 chats = (self.data or {}).get(wuid, {}).get(SENSOR_MESSAGE, {}) or {}
 
             # Battery/charging/location/unread-count come from the `deviceList` call
