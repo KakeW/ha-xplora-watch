@@ -178,6 +178,43 @@ class XploraConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Handle the initial step."""
         return self.async_show_menu(step_id="user", menu_options=["user_email", "user_phone"])
 
+    async def async_step_reauth(self, entry_data: dict[str, Any]) -> ConfigFlowResult:
+        """Start re-authentication for an existing account without replacing its config entry."""
+        return await self.async_step_reauth_confirm()
+
+    async def async_step_reauth_confirm(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Validate a replacement password and update the existing entry in place.
+
+        Keeping the same config entry ID is important: location history and other local stores
+        are keyed by it and therefore remain connected to the watches after the reload.
+        """
+        entry = self._get_reauth_entry()
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            updated_data = {**entry.data, CONF_PASSWORD: user_input[CONF_PASSWORD]}
+            try:
+                await validate_input(self.hass, updated_data)
+            except PhoneOrEmailFail:
+                errors["base"] = "phone_email_invalid"
+            except LoginError:
+                errors["base"] = "pass_invalid"
+            except Error:
+                errors["base"] = "cannot_connect"
+            else:
+                return self.async_update_reload_and_abort(
+                    entry,
+                    data_updates={CONF_PASSWORD: user_input[CONF_PASSWORD]},
+                    reason="reauth_successful",
+                )
+
+        return self.async_show_form(
+            step_id="reauth_confirm",
+            data_schema=vol.Schema(
+                {vol.Required(CONF_PASSWORD): TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD))}
+            ),
+            errors=errors,
+        )
+
     async def async_step_user_phone(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Handle the initial step."""
         errors: dict[str, str] = {}

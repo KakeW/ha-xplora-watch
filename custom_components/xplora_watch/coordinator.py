@@ -14,6 +14,7 @@ from homeassistant.components.device_tracker.const import ATTR_BATTERY, ATTR_LOC
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_COUNTRY_CODE, CONF_EMAIL, CONF_PASSWORD, Platform
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers import aiohttp_client
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.event import async_track_time_change
@@ -235,6 +236,7 @@ class XploraDataUpdateCoordinator(DataUpdateCoordinator):
         super().__init__(
             hass,
             self._log.underlying_logger,
+            config_entry=entry,
             name=f"{DOMAIN}-{entry.data[CONF_PHONENUMBER][5:] if CONF_EMAIL not in entry.data else ''}",
             update_method=self.async_update_xplora_data,
             update_interval=_update_interval,
@@ -870,10 +872,19 @@ class XploraDataUpdateCoordinator(DataUpdateCoordinator):
             # poll (entities go `unavailable`) rather than silently keeping stale values. In-memory
             # `coordinator.data` and `RestoreEntity` still hold the last good value.
             raise UpdateFailed(f"Xplora connection error: {err}") from err
-        except (AuthError, LoginError, Error) as err:
-            # Recovery was attempted and could not help (refused refresh + failed re-login, an
-            # unknown/empty refresh outcome surfaced as AuthError, or a generic client error).
-            raise UpdateFailed(f"Xplora auth failed: {err}") from err
+        except LoginError as err:
+            # Recovery was attempted and could not help. Ask HA to start the config-entry
+            # reauth flow so the user can replace credentials without deleting this entry.
+            raise ConfigEntryAuthFailed(f"Xplora authentication failed: {err}") from err
+        except AuthError as err:
+            # A token refresh may fail without a definitive auth refusal (for example, a
+            # transient/empty server response). Keep retrying normally; do not ask for a
+            # password unless the actual sign-in was rejected.
+            raise UpdateFailed(f"Xplora token recovery did not complete: {err}") from err
+        except Error as err:
+            # A generic API/client failure is not necessarily a credential problem; keep HA's
+            # normal retry behavior rather than prompting for a password unnecessarily.
+            raise UpdateFailed(f"Xplora API request failed: {err}") from err
         if not self.data:
             self.data = watch_entry
         else:

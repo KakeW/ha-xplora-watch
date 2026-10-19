@@ -7,6 +7,7 @@ import logging
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_EMAIL, EVENT_HOMEASSISTANT_STOP, Platform
 from homeassistant.core import Event, HomeAssistant, callback
+from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers import aiohttp_client
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import entity_registry as er
@@ -19,6 +20,7 @@ from .const import ATTR_WATCH, DATA_HASS_CONFIG, DOMAIN, GUARDIAN_ONLY_KEYS
 from .coordinator import XploraDataUpdateCoordinator
 from .demo import is_demo_account
 from .helper import account_token, async_register_frontend_card, create_www_directory
+from .pyxplora_api.exception_classes import LoginError
 from .services import async_setup_services, async_unload_services
 from .websocket import async_register_websocket_commands
 
@@ -59,7 +61,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator: XploraDataUpdateCoordinator = XploraDataUpdateCoordinator(hass, entry)
     session = aiohttp_client.async_get_clientsession(hass)
 
-    await coordinator.init(session=session)
+    try:
+        await coordinator.init(session=session)
+    except LoginError as err:
+        # A failed stored-session recovery during startup should open the same reauth flow as
+        # an authentication failure discovered by a later coordinator refresh.
+        raise ConfigEntryAuthFailed(f"Xplora authentication failed: {err}") from err
 
     await _async_migrate_entries(hass, entry, coordinator.user_id)
     _async_remove_orphaned_switch_entities(hass, entry)

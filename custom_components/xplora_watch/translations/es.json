@@ -28,7 +28,8 @@
   "config": {
     "abort": {
       "already_configured": "La integración ya ha sido configurada",
-      "single_instance_allowed": "Ya configurado. Solo se permite una configuración."
+      "single_instance_allowed": "Ya configurado. Solo se permite una configuración.",
+      "reauth_successful": "Cuenta de Xplora autenticada de nuevo"
     },
     "create_entry": {
       "default": "¡Se creó la integración de HA Xplora® Watch!"
@@ -40,6 +41,13 @@
       "phone_email_invalid": "El número de teléfono o dirección de correo electrónico no existen"
     },
     "step": {
+      "reauth_confirm": {
+        "data": {
+          "password": "Contraseña de la cuenta de Xplora"
+        },
+        "description": "Inicia sesión de nuevo para restablecer la conexión con Xplora. Se conservarán tus relojes y el historial de ubicaciones almacenado localmente.",
+        "title": "Volver a autenticar la cuenta de Xplora"
+      },
       "user": {
         "menu_options": {
           "user_email": "iniciar sesión con dirección de correo electrónico",

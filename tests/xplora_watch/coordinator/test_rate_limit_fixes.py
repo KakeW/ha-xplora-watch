@@ -17,6 +17,7 @@ import aiohttp
 import pytest
 from aioresponses import CallbackResult, aioresponses
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers import aiohttp_client
 from homeassistant.helpers.update_coordinator import UpdateFailed
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -283,10 +284,10 @@ async def test_e000004_auth_refused_refresh_falls_back_to_one_relogin(
     assert DEFAULT_WUID in result
 
 
-async def test_e000004_raises_update_failed_when_refresh_and_relogin_both_fail(
+async def test_e000004_raises_auth_failed_when_refresh_and_relogin_both_fail(
     hass: HomeAssistant, mock_config_entry_phone: MockConfigEntry
 ) -> None:
-    """Auth-refused refresh -> one re-login -> the re-login also fails -> UpdateFailed (bounded)."""
+    """Auth-refused refresh -> one re-login -> rejected credentials prompt HA reauth."""
     counts = {"login": 0, "refresh": 0, "alarms": 0}
     operations = _operations()
     default_callback = _make_graphql_callback(operations)
@@ -314,7 +315,7 @@ async def test_e000004_raises_update_failed_when_refresh_and_relogin_both_fail(
         _mock_geocoding(mocked)
         coord = await _init_coordinator(hass, mock_config_entry_phone)
 
-        with pytest.raises(UpdateFailed):
+        with pytest.raises(ConfigEntryAuthFailed):
             await coord.async_update_xplora_data()
 
     assert counts["refresh"] == 1
