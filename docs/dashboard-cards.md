@@ -17,11 +17,12 @@ Tapping the location row opens a live map with the watch's last-known position a
 Tapping the **Location history** row opens a date bar and a map track of where the watch has been
 on a given day — see [Location history](location-history.md).
 
-When the watch's `*_message` sensor is enabled, the overview also shows **Call log**. It filters
-the recent records returned by Xplora to calls and watch power-on/power-off events. The log refreshes
-through the existing message read service; its history is therefore limited by the integration's
-message-count setting (10 by default, configurable up to 100). Xplora's `call_time` and `call_type`
-values are shown as supplied by the API because their units/codes have not yet been confirmed.
+When the watch's `*_message` sensor is enabled, the overview also shows **Call log**. Call records
+come from Xplora's dedicated device call-history API and are cached with the message sensor; power
+events, when returned, come from the recent message feed. Opening the card reads the cache and does
+not make a network request. Initial setup, push-triggered message refreshes, and manual refreshes
+update the call-history cache. The card displays the API's `time`, `callName`, `callNumber`,
+`callType`, `callMode`, and `duration` fields.
 
 ## Alarms & Silent Times card
 
@@ -146,10 +147,12 @@ type: custom:xplora-watch-call-log-card
 entity: sensor.kid_one_watch_message
 ```
 
-The card fetches the records on first open and has a refresh button. It uses the integration's
-configured message-count limit, so raise that setting if you need a larger recent window. The API
-provides `call_name`, `call_time`, and `call_type`; until their meaning is confirmed from real call
-records, the card displays the latter two as raw API values.
+The card reads its records from the watch's message sensor cache, so opening it is immediate. Its
+refresh button uses the existing message-read service, which updates chats and the dedicated call
+history together. Calls come from Xplora's `getDeviceCallLog(watchId:)` API and are not limited by
+the chat message-count setting. The card renders the API's `time`, contact/name, phone number,
+call type/mode, and duration values; the API declares duration as a string, so it is shown as
+returned rather than converted to a guessed unit.
 
 ![Chat card](../images/chat_card.png)
 

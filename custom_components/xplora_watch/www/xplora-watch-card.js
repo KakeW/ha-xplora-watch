@@ -2322,15 +2322,23 @@ class XploraWatchOverviewCard extends HTMLElement {
           })()
         : "";
 
-    // The message sensor also carries Xplora system records (calls and watch power events). Keep
-    // this separate from the chat tile: opening the log should never mark chat messages as read.
+    // Call records come from the dedicated device call-log cache; power events may still be
+    // present in the recent chat feed. Keep this separate from the chat tile so opening it
+    // never marks chat messages as read.
     const messageEnt = st("messages");
     const activityRow = this._usable(messageEnt)
       ? (() => {
-          const entries = messageEnt.attributes && messageEnt.attributes.list;
-          const count = Array.isArray(entries)
-            ? entries.filter((item) => ["CALL_LOG", "POWER_ON", "POWER_OFF"].includes(item && item.type)).length
+          const attrs = messageEnt.attributes || {};
+          const entries = attrs.list;
+          const calls = Array.isArray(attrs.call_log_list)
+            ? attrs.call_log_list.length
+            : Array.isArray(entries)
+              ? entries.filter((item) => item && item.type === "CALL_LOG").length
+              : null;
+          const powerEvents = Array.isArray(entries)
+            ? entries.filter((item) => item && ["POWER_ON", "POWER_OFF"].includes(item.type)).length
             : null;
+          const count = calls === null || powerEvents === null ? null : calls + powerEvents;
           const sub = count === null ? "Recent calls and watch events" : `${count} event${count === 1 ? "" : "s"}`;
           return `<button class="row" data-call-log="${this._esc(map.messages)}">
                <ha-icon class="row-icon" icon="mdi:phone-log"></ha-icon>
@@ -4635,7 +4643,7 @@ window.customCards.push({
   preview: true,
 });
 
-/** A per-watch view of call and power events returned alongside the Xplora chat records. */
+/** A per-watch view of the dedicated call-log cache and recent power events. */
 class XploraWatchCallLogCard extends HTMLElement {
   constructor() {
     super();
@@ -4673,15 +4681,21 @@ class XploraWatchCallLogCard extends HTMLElement {
   _esc(value) { return String(value == null ? "" : value).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]); }
   _locale() { return (this._hass && this._hass.locale && this._hass.locale.language) || navigator.language || "en"; }
   _events() {
-    const list = this._attrs().list;
-    return (Array.isArray(list) ? list : [])
-      .filter((item) => item && ["CALL_LOG", "POWER_ON", "POWER_OFF"].includes(item.type))
+    const attrs = this._attrs();
+    const calls = Array.isArray(attrs.call_log_list)
+      ? attrs.call_log_list.map((item) => ({ ...item, type: "CALL_LOG" }))
+      : Array.isArray(attrs.list)
+        ? attrs.list.filter((item) => item && item.type === "CALL_LOG")
+        : [];
+    const powerEvents = Array.isArray(attrs.list) ? attrs.list.filter((item) => item && ["POWER_ON", "POWER_OFF"].includes(item.type)) : [];
+    return [...calls, ...powerEvents]
       .slice()
       .sort((a, b) => this._stamp(b) - this._stamp(a));
   }
   _stamp(item) {
-    const raw = item && (item.create != null ? item.create : item.data && item.data.tm);
+    const raw = item && (item.time != null ? item.time : item.create != null ? item.create : item.data && item.data.tm);
     let value = Number(raw);
+    if (!Number.isFinite(value) && raw) value = Date.parse(raw);
     if (!Number.isFinite(value)) return 0;
     if (value > 0 && value < 1e12) value *= 1000;
     return value;
@@ -4693,20 +4707,23 @@ class XploraWatchCallLogCard extends HTMLElement {
   _title(item) {
     if (item.type === "POWER_ON") return "Watch switched on";
     if (item.type === "POWER_OFF") return "Watch switched off";
-    const name = item.data && item.data.call_name;
+    const name = item.callName || (item.data && item.data.call_name);
     return name ? `Call · ${name}` : "Call";
   }
   _details(item) {
     if (item.type !== "CALL_LOG") return "";
     const data = item.data || {};
     const details = [];
-    // call_time is displayed as the API supplied it: the integration has no verified unit mapping.
-    if (data.call_time !== null && data.call_time !== undefined && data.call_time !== "") {
-      details.push(`Duration (API value): ${data.call_time}`);
+    const duration = item.duration != null && item.duration !== "" ? item.duration : data.call_time;
+    if (duration != null && duration !== "") {
+      details.push(item.duration != null ? `Duration: ${duration}` : `Duration (API value): ${duration}`);
     }
-    if (data.call_type !== null && data.call_type !== undefined && data.call_type !== "") {
-      details.push(`Call type: ${data.call_type}`);
-    }
+    const callType = item.callType || data.call_type;
+    const callMode = item.callMode || data.call_mode;
+    const callNumber = item.callNumber || data.call_number;
+    if (callType) details.push(`Call type: ${callType}`);
+    if (callMode) details.push(`Call mode: ${callMode}`);
+    if (callNumber) details.push(callNumber);
     return details.join(" · ");
   }
   async _refresh() {
@@ -4728,7 +4745,8 @@ class XploraWatchCallLogCard extends HTMLElement {
   _render() {
     if (!this.shadowRoot) return;
     const events = this._events();
-    const loaded = Array.isArray(this._attrs().list);
+    const loaded = Array.isArray(this._attrs().call_log_list) || Array.isArray(this._attrs().list);
+    const apiError = this._attrs().call_log_error;
     this.shadowRoot.innerHTML = `
       <style>
         :host { display:block; }
@@ -4764,9 +4782,9 @@ class XploraWatchCallLogCard extends HTMLElement {
             <div class="main">${this._esc(this._title(item))}</div>
             <div class="time">${this._esc(this._time(item))}</div>
             ${details ? `<div class="detail">${this._esc(details)}</div>` : ""}
-          </div></li>`;
-        }).join("")}</ul>` : `<div class="empty">${this._fetching || !loaded ? "Loading recent events…" : "No call or power events in the fetched message window."}</div>`}
-        <div class="scope">The log uses the most recent records returned by Xplora. Its size follows the integration’s message-count setting.</div>
+        </div></li>`;
+        }).join("")}</ul>` : `<div class="empty">${apiError ? `Could not load call history: ${this._esc(apiError)}` : this._fetching || !loaded ? "Loading recent events…" : "No call or power events were returned by Xplora."}</div>`}
+        <div class="scope">Calls come from Xplora’s device call-history API; power events, when present, come from the recent message feed.</div>
       </ha-card>`;
     const refresh = this.shadowRoot.querySelector(".refresh");
     if (refresh) refresh.addEventListener("click", () => this._refresh());

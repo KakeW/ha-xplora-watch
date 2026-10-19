@@ -31,4 +31,38 @@ describe("call log cache-first rendering", () => {
     expect(el.shadowRoot.textContent).toContain("Watch switched on");
     expect(calls).toEqual([]);
   });
+
+  it("renders call records from the dedicated call-history cache", () => {
+    const calls = [];
+    const el = document.createElement("xplora-watch-call-log-card");
+    el.setConfig({ entity: "sensor.watch_message" });
+    document.body.appendChild(el);
+    el.hass = {
+      states: {
+        "sensor.watch_message": {
+          entity_id: "sensor.watch_message",
+          state: "ok",
+          last_updated: "2026-10-19T10:00:00Z",
+          attributes: {
+            call_log_list: [{
+              time: "2026-10-18T16:18:13Z",
+              callName: "Test contact",
+              callNumber: "+358401234567",
+              callType: "VOICE",
+              callMode: "OUTGOING",
+              duration: "00:02:14",
+            }],
+            list: [],
+          },
+        },
+      },
+      callService: async (...args) => calls.push(args),
+    };
+
+    expect(el.shadowRoot.textContent).toContain("Call · Test contact");
+    expect(el.shadowRoot.textContent).toContain("00:02:14");
+    expect(el.shadowRoot.textContent).toContain("OUTGOING");
+    expect(el.shadowRoot.textContent).toContain(new Date("2026-10-18T16:18:13Z").toLocaleString());
+    expect(calls).toEqual([]);
+  });
 });

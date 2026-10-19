@@ -22,8 +22,13 @@ async def test_message_data_leaves_other_wuids_untouched(
         DEFAULT_WUID: {"battery": 80, "isOnline": True},
         "other-wuid": {"battery": 50},
     }
+    coordinator.controller.device[DEFAULT_WUID] = {"device_id": f"device-{DEFAULT_WUID}"}
 
     await coordinator.message_data(DEFAULT_WUID, message_limit=10, remove_message=False)
 
     assert coordinator.data["other-wuid"] == {"battery": 50}
-    assert coordinator.data[DEFAULT_WUID] == {"battery": 80, "isOnline": True, SENSOR_MESSAGE: {"list": []}}
+    assert coordinator.data[DEFAULT_WUID] == {
+        "battery": 80,
+        "isOnline": True,
+        SENSOR_MESSAGE: {"list": [], "call_log_list": []},
+    }

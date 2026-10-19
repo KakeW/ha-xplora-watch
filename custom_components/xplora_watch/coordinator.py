@@ -935,9 +935,13 @@ class XploraDataUpdateCoordinator(DataUpdateCoordinator):
                 for item in chats.get("list") or []:
                     if str(item.get("msgId")) in acknowledged:
                         item[ATTR_CHAT_READ_RECEIPT_SENT] = True
+                # CALL_LOG is not part of chatsNew. Fetch it from Xplora's dedicated device
+                # call-log resolver whenever this refresh also warms the message cache.
+                call_log_result = await self.controller.getWatchCallLog(wuid)
             else:
                 # Lean scheduled polls reuse the last-known messages rather than issuing a Chats request.
                 chats = (self.data or {}).get(wuid, {}).get(SENSOR_MESSAGE, {}) or {}
+                call_log_result = None
 
             # Battery/charging/location/unread-count come from the `deviceList` call
             # `setDevices()` already made (see ISSUE-12), overlaid with the fresh fix above.
@@ -966,6 +970,18 @@ class XploraDataUpdateCoordinator(DataUpdateCoordinator):
             if include_history:
                 await self._fetch_loc_history(wuid)
             watch_data = self.get_data(wuid, chats)
+            message_cache = watch_data[wuid][SENSOR_MESSAGE]
+            previous_message_cache = (self.data or {}).get(wuid, {}).get(SENSOR_MESSAGE) or {}
+            if call_log_result is not None and not call_log_result.get("_error"):
+                message_cache["call_log_list"] = call_log_result.get("list") or []
+                message_cache.pop("call_log_error", None)
+            else:
+                # Preserve the last successful call history through API errors and lean polls.
+                message_cache["call_log_list"] = previous_message_cache.get("call_log_list", [])
+                if call_log_result and call_log_result.get("_error"):
+                    message_cache["call_log_error"] = call_log_result["_error"]
+                elif previous_message_cache.get("call_log_error"):
+                    message_cache["call_log_error"] = previous_message_cache["call_log_error"]
             # Record the per-watch update outcome. A primary guardian drives location tracking, so
             # the watch accepting the locate request (ok) vs. being off / out of reach (no_response)
             # is a real signal worth surfacing. A secondary guardian frequently cannot trigger a
@@ -1604,9 +1620,10 @@ class XploraDataUpdateCoordinator(DataUpdateCoordinator):
         }
 
     async def message_data(self, wuid: str, message_limit: int, remove_message: bool) -> dict[str, Any]:
-        """Fetch message chats from Xplora."""
+        """Fetch chats and call history from Xplora into the local message cache."""
         self._log.debug("Fetch message data from Xplora: %s", wuid[25:])
         res_chats = await self.controller.getWatchChatsRaw(wuid, limit=message_limit, show_del_msg=remove_message, mark_as_read=False)
+        call_log_result = await self.controller.getWatchCallLog(wuid)
         if isinstance(res_chats, ChatsNew):
             res_chats = res_chats.to_dict()
         chats = ChatsNew.from_dict(res_chats).to_dict()
@@ -1636,6 +1653,13 @@ class XploraDataUpdateCoordinator(DataUpdateCoordinator):
             if unread:
                 previous = watch_data.get("unreadMsg")
                 watch_data["unreadMsg"] = max(previous if isinstance(previous, int) else 0, unread)
+            if not call_log_result.get("_error"):
+                chats["call_log_list"] = call_log_result.get("list") or []
+                chats.pop("call_log_error", None)
+            else:
+                # A failed call-history request must not erase the last successful cache.
+                chats["call_log_list"] = (watch_data.get(SENSOR_MESSAGE) or {}).get("call_log_list", [])
+                chats["call_log_error"] = call_log_result["_error"]
             watch_data[SENSOR_MESSAGE] = chats
             watch_entry[wuid] = watch_data
             self.data = watch_entry
