@@ -109,6 +109,16 @@ _HISTORY_CONSUMERS: tuple[tuple[Platform, str], ...] = ((Platform.SENSOR, f"_{AT
 STORAGE_VERSION = 1
 
 
+async def async_clear_auth_session_store(hass: HomeAssistant, entry_id: str) -> None:
+    """Remove only the persisted Xplora auth session for an entry.
+
+    Re-authentication must not restore the expired access/refresh token on the next setup. Keep
+    history and the other per-entry stores intact.
+    """
+    store = Store(hass, STORAGE_VERSION, f"{DOMAIN}.{entry_id}.session")
+    await store.async_remove()
+
+
 class XploraDataUpdateCoordinator(DataUpdateCoordinator):
     """Create XploraDataUpdateCoordinator that manages data updates."""
 

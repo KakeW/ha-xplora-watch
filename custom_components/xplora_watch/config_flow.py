@@ -81,6 +81,7 @@ from .const import (
     normalize_scan_interval_functions,
 )
 from .const_schema import DATA_SCHEMA_EMAIL, DATA_SCHEMA_PHONE
+from .coordinator import async_clear_auth_session_store
 from .demo import make_controller
 from .helper import watch_user_label
 from .pyxplora_api.exception_classes import Error, LoginError, PhoneOrEmailFail
@@ -201,6 +202,10 @@ class XploraConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             except Error:
                 errors["base"] = "cannot_connect"
             else:
+                # Drop only the stale token blob. The config entry ID (and the separate local
+                # history store keyed by it) is preserved; setup will create and persist a fresh
+                # session with the newly validated password.
+                await async_clear_auth_session_store(self.hass, entry.entry_id)
                 return self.async_update_reload_and_abort(
                     entry,
                     data_updates={CONF_PASSWORD: user_input[CONF_PASSWORD]},
