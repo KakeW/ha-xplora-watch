@@ -1099,11 +1099,10 @@ class PyXploraApi(PyXplora):
         Returns a `TokenRefreshOutcome` so the coordinator can decide whether a full re-login
         is warranted:
           - `REFRESHED`    -> a new token was obtained and stored.
-          - `AUTH_REFUSED` -> the server responded with a structured `errors` body (for the
-            `RefreshToken` op the only realistic structured error is a rejected/expired
-            refresh token) -> a single full re-login is warranted.
-          - `FAILED`       -> no token and no structured error (empty body from a swallowed
-            5xx / transport hiccup) -> transient/unknown, do NOT re-login.
+          - `AUTH_REFUSED` -> the server returned a structured `errors` body, or explicitly
+            returned `data.refreshToken: null` -> a single full re-login is warranted.
+          - `FAILED`       -> no token and no structured refusal (for example, an empty body
+            from a swallowed 5xx / transport hiccup) -> transient/unknown, do NOT re-login.
 
         Transient *exceptions* (`RateLimitError`, `ConnectionError`/`Error`) raised by
         `refresh_token_a` are deliberately NOT caught here -- they propagate to the
@@ -1114,10 +1113,13 @@ class PyXploraApi(PyXplora):
         new_token = new_token_info.get("token") if new_token_info else None
         new_refresh_token = new_token_info.get("refreshToken") if new_token_info else None
         if not new_token or not new_refresh_token:
-            # No usable token. A structured `errors` body means the server actively refused
-            # the refresh token (auth failure -> re-login); an empty response means we never
-            # got a real answer (transient -> no re-login).
-            if response.get("errors"):
+            # No usable token. Structured errors or an explicit null refreshToken mean the
+            # server answered but could not refresh this session; escalate once to full login.
+            # A truly empty/missing response has no reliable auth signal, so keep it retryable.
+            response_data = response.get("data")
+            if response.get("errors") or (
+                isinstance(response_data, dict) and "refreshToken" in response_data and new_token_info is None
+            ):
                 return TokenRefreshOutcome.AUTH_REFUSED
             return TokenRefreshOutcome.FAILED
 

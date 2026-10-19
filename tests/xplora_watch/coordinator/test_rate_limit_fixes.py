@@ -395,10 +395,8 @@ async def test_e000004_connection_error_during_refresh_does_not_relogin(
     assert counts["login"] == 1  # NO re-login on a connection error
 
 
-async def test_e000004_empty_refresh_response_does_not_relogin(hass: HomeAssistant, mock_config_entry_phone: MockConfigEntry) -> None:
-    """A refresh response with no token AND no structured errors (e.g. a swallowed 5xx) is
-    transient/unknown, not a confirmed auth refusal -> UpdateFailed, NO re-login.
-    """
+async def test_e000004_null_refresh_token_triggers_relogin(hass: HomeAssistant, mock_config_entry_phone: MockConfigEntry) -> None:
+    """An explicit null refreshToken is a server response, so retry with one full login."""
     counts = {"login": 0, "refresh": 0, "alarms": 0}
     operations = _operations()
     default_callback = _make_graphql_callback(operations)
@@ -411,6 +409,38 @@ async def test_e000004_empty_refresh_response_does_not_relogin(hass: HomeAssista
         elif op == "RefreshToken":
             counts["refresh"] += 1
             return CallbackResult(status=200, payload={"data": {"refreshToken": None}})
+        elif op == "Alarms":
+            counts["alarms"] += 1
+            if counts["alarms"] == 1:
+                return CallbackResult(status=200, payload={"errors": [{"code": "E000004"}]})
+        return default_callback(url, **kwargs)
+
+    with aioresponses() as mocked:
+        mocked.post(ENDPOINT, callback=_callback, repeat=True)
+        _mock_geocoding(mocked)
+        coord = await _init_coordinator(hass, mock_config_entry_phone)
+        result = await coord.async_update_xplora_data()
+
+    assert counts["refresh"] == 1
+    assert counts["login"] == 2  # initial login + one forced re-login
+    assert DEFAULT_WUID in result
+
+
+async def test_e000004_empty_refresh_response_does_not_relogin(hass: HomeAssistant, mock_config_entry_phone: MockConfigEntry) -> None:
+    """A truly empty refresh envelope is ambiguous/transient -> UpdateFailed, NO re-login.
+    """
+    counts = {"login": 0, "refresh": 0, "alarms": 0}
+    operations = _operations()
+    default_callback = _make_graphql_callback(operations)
+
+    def _callback(url: Any, **kwargs: Any) -> CallbackResult:
+        body = kwargs.get("json") or {}
+        op = body.get("operationName")
+        if op == "signInWithEmailOrPhone":
+            counts["login"] += 1
+        elif op == "RefreshToken":
+            counts["refresh"] += 1
+            return CallbackResult(status=200, payload={})
         elif op == "Alarms":
             counts["alarms"] += 1
             if counts["alarms"] == 1:
