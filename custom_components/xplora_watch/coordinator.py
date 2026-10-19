@@ -877,10 +877,11 @@ class XploraDataUpdateCoordinator(DataUpdateCoordinator):
             # reauth flow so the user can replace credentials without deleting this entry.
             raise ConfigEntryAuthFailed(f"Xplora authentication failed: {err}") from err
         except AuthError as err:
-            # A token refresh may fail without a definitive auth refusal (for example, a
-            # transient/empty server response). Keep retrying normally; do not ask for a
-            # password unless the actual sign-in was rejected.
-            raise UpdateFailed(f"Xplora token recovery did not complete: {err}") from err
+            # The original request received E000004, and recovery could not produce a valid
+            # session. Even if RefreshToken's response was empty/ambiguous, another poll with
+            # these credentials cannot make progress; let HA offer re-authentication. Explicit
+            # transient failures (429, connection errors) are handled above and remain retryable.
+            raise ConfigEntryAuthFailed(f"Xplora token recovery did not complete: {err}") from err
         except Error as err:
             # A generic API/client failure is not necessarily a credential problem; keep HA's
             # normal retry behavior rather than prompting for a password unnecessarily.

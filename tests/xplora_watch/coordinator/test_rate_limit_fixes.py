@@ -426,8 +426,8 @@ async def test_e000004_null_refresh_token_triggers_relogin(hass: HomeAssistant, 
     assert DEFAULT_WUID in result
 
 
-async def test_e000004_empty_refresh_response_does_not_relogin(hass: HomeAssistant, mock_config_entry_phone: MockConfigEntry) -> None:
-    """A truly empty refresh envelope is ambiguous/transient -> UpdateFailed, NO re-login.
+async def test_e000004_empty_refresh_response_requests_reauth(hass: HomeAssistant, mock_config_entry_phone: MockConfigEntry) -> None:
+    """If refresh cannot recover a confirmed-expired session, ask HA for re-authentication.
     """
     counts = {"login": 0, "refresh": 0, "alarms": 0}
     operations = _operations()
@@ -453,11 +453,11 @@ async def test_e000004_empty_refresh_response_does_not_relogin(hass: HomeAssista
         coord = await _init_coordinator(hass, mock_config_entry_phone)
         assert counts["login"] == 1
 
-        with pytest.raises(UpdateFailed):
+        with pytest.raises(ConfigEntryAuthFailed, match="token recovery did not complete"):
             await coord.async_update_xplora_data()
 
     assert counts["refresh"] == 1
-    assert counts["login"] == 1  # NO re-login on an empty/unknown refresh outcome
+    assert counts["login"] == 1  # no full login was attempted; HA now offers re-authentication
 
 
 # --- ISSUE-8: wire fingerprint ---------------------------------------------------------------
