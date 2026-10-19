@@ -17,12 +17,10 @@ Tapping the location row opens a live map with the watch's last-known position a
 Tapping the **Location history** row opens a date bar and a map track of where the watch has been
 on a given day — see [Location history](location-history.md).
 
-When the watch's `*_message` sensor is enabled, the overview also shows **Call log**. Call records
-come from Xplora's dedicated device call-history API and are cached with the message sensor; power
-events, when returned, come from the recent message feed. Opening the card reads the cache and does
-not make a network request. Initial setup, push-triggered message refreshes, and manual refreshes
-update the call-history cache. The card displays the API's `time`, `callName`, `callNumber`,
-`callType`, `callMode`, and `duration` fields.
+When the watch's `*_message` sensor is enabled, the overview also shows **Call log**. Call and
+power events come from Xplora's notification feed and are cached with the message sensor. Opening
+the card reads the cache and does not make a network request. Initial setup, push-triggered message
+refreshes, and manual refreshes update the event cache.
 
 ## Alarms & Silent Times card
 
@@ -148,11 +146,10 @@ entity: sensor.kid_one_watch_message
 ```
 
 The card reads its records from the watch's message sensor cache, so opening it is immediate. Its
-refresh button uses the existing message-read service, which updates chats and the dedicated call
-history together. Calls come from Xplora's `getDeviceCallLog(watchId:)` API and are not limited by
-the chat message-count setting. The card renders the API's `time`, contact/name, phone number,
-call type/mode, and duration values; the API declares duration as a string, so it is shown as
-returned rather than converted to a guessed unit.
+refresh button uses the existing message-read service, which updates chats and the recent call and
+power events together. Events are fetched from Xplora's notifications feed (the app's
+`NotificationsList` query), separately from chat messages; the integration currently requests the
+newest 50 notifications and filters for call and power events.
 
 ![Chat card](../images/chat_card.png)
 

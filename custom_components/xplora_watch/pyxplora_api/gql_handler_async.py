@@ -296,15 +296,17 @@ class GQLHandler(HandlerGQL):
             return Chats.from_dict(res.get("data", {}))
         return res.get("data", {})
 
-    async def device_call_log_a(self, watch_id: str) -> GqlResponse:
-        """Fetch the vendor's dedicated call-log records for one device id."""
+    async def notification_list_a(self, wuid: str, limit: int = 50) -> GqlResponse:
+        """Fetch Xplora's notification feed for a ward, as used by its app."""
         response = await self.runAuthorizedGqlQuery_a(
-            gq.WATCH_Q.get("deviceCallLogQ", ""), {"watchId": watch_id}, "GetDeviceCallLog"
+            gq.WATCH_Q.get("notificationsQ", ""),
+            {"uid": wuid, "msgId": None, "offset": 0, "limit": limit},
+            "notifications",
         )
-        _RAW_LOGGER.debug("raw getDeviceCallLog response: %s", response)
+        # Do not log notification data: it contains message and contact information.
         errors = response.get("errors") or []
         if errors:
-            _LOGGER.debug("getDeviceCallLog returned errors: %s", errors)
+            _LOGGER.debug("notifications query returned errors: %s", errors)
         return response
 
     async def fetchChatImage_a(self, wuid: str, msgId: str) -> dict[str, Any]:

@@ -957,8 +957,7 @@ class XploraDataUpdateCoordinator(DataUpdateCoordinator):
                 for item in chats.get("list") or []:
                     if str(item.get("msgId")) in acknowledged:
                         item[ATTR_CHAT_READ_RECEIPT_SENT] = True
-                # CALL_LOG is not part of chatsNew. Fetch it from Xplora's dedicated device
-                # call-log resolver whenever this refresh also warms the message cache.
+                # Call and power events are sourced from Xplora's notification feed, not chatsNew.
                 call_log_result = await self.controller.getWatchCallLog(wuid)
             else:
                 # Lean scheduled polls reuse the last-known messages rather than issuing a Chats request.

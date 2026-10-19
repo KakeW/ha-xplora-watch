@@ -65,4 +65,23 @@ describe("call log cache-first rendering", () => {
     expect(el.shadowRoot.textContent).toContain(new Date("2026-10-18T16:18:13Z").toLocaleString());
     expect(calls).toEqual([]);
   });
+
+  it("renders cached power events without duplicating the chat-feed copy", () => {
+    const el = document.createElement("xplora-watch-call-log-card");
+    el.setConfig({ entity: "sensor.watch_message" });
+    document.body.appendChild(el);
+    const event = { type: "POWER_OFF", msgId: "off-1", create: 1700000000 };
+    el.hass = {
+      states: {
+        "sensor.watch_message": {
+          entity_id: "sensor.watch_message",
+          state: "ok",
+          attributes: { call_log_list: [event], list: [event] },
+        },
+      },
+      callService: async () => {},
+    };
+
+    expect(el.shadowRoot.textContent.match(/Watch switched off/g)).toHaveLength(1);
+  });
 });

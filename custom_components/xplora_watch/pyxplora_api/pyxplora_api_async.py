@@ -378,8 +378,8 @@ class PyXploraApi(PyXplora):
         tm = location.get("tm")
 
         self.device[wuid] = {
-            # Xplora's dedicated call-log resolver requires the WatchListItem's device id,
-            # which is distinct from the ward/user id used by chats and location queries.
+            # Keep the device id available for device-level operations. Notification history
+            # uses the ward/user id instead.
             "device_id": status.get("id"),
             "getWatchAlarm": watch_alarm,
             "watch_battery": status.get("battery", -1),
@@ -704,33 +704,27 @@ class PyXploraApi(PyXplora):
         return ChatsNew.from_dict(chats_new, infer_missing=True) if asObject else chats_new
 
     async def getWatchCallLog(self, wuid: str) -> dict[str, Any]:
-        """Fetch call records using the watch's device id, not its ward/user id."""
-        device_id = self.getDevice(wuid).get("device_id")
-        if not device_id:
-            _LOGGER.debug("Call log skipped for ...%s: device id is unavailable", wuid[25:])
-            return {"_error": "Device id is unavailable"}
-
+        """Fetch call and power events from the app's per-ward notification feed."""
         try:
-            response = await self._gql_handler.device_call_log_a(str(device_id))
+            response = await self._gql_handler.notification_list_a(wuid)
         except AuthError as error:
-            # A token-expired response from this auxiliary endpoint must not trigger
-            # account-wide token recovery: the same session may still serve the
-            # watch's other data. Report this endpoint failure so the coordinator
-            # preserves the call-log cache and continues refreshing other data.
+            # This feed is auxiliary. An endpoint-specific auth failure should not
+            # abort a refresh that has already loaded the watch's other data.
             return {"_error": str(error) or "Xplora call-history authentication failed"}
         except Error as error:
-            # Call history is auxiliary to chats and device status. Keep the last
-            # successful cache instead of failing a refresh that fetched other data.
             return {"_error": str(error) or "Xplora call-history request failed"}
         errors = response.get("errors") or []
         if errors:
             return {"_error": "; ".join(str(error.get("message", "GraphQL error")) for error in errors)}
-        result = (response.get("data") or {}).get("getDeviceCallLog")
-        if not isinstance(result, dict) or "callLogs" not in result:
-            return {"_error": "Call log response did not contain callLogs"}
-        # The shipped app schema declares callLogs as nullable: null is a valid
-        # empty result, while a missing field indicates an incomplete response.
-        return {"list": result.get("callLogs") or []}
+        result = (response.get("data") or {}).get("notifications")
+        if not isinstance(result, dict) or "list" not in result:
+            return {"_error": "Notification response did not contain a list"}
+        events = [
+            item
+            for item in (result.get("list") or [])
+            if isinstance(item, dict) and item.get("type") in {"CALL_LOG", "POWER_ON", "POWER_OFF"}
+        ]
+        return {"list": events}
 
     ##### Watch Location Info #####
     async def getWatchLastLocation(self, wuid: str) -> dict[str, Any]:

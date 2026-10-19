@@ -304,9 +304,9 @@ def make_chats_payload() -> dict[str, Any]:
     }
 
 
-def make_device_call_log_payload(call_logs: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-    """Response for Xplora's dedicated ``GetDeviceCallLog`` operation."""
-    return {"getDeviceCallLog": {"watch": {"id": "device-watch-id-001"}, "callLogs": call_logs or []}}
+def make_notifications_payload(items: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    """Response for Xplora's app-style notification feed."""
+    return {"notifications": {"msgId": None, "offset": 0, "limit": 50, "total": 0, "list": items or []}}
 
 
 def make_user_steps_payload(day: int = 1234) -> dict[str, Any]:
@@ -420,7 +420,7 @@ DEFAULT_OPERATION_PAYLOADS: dict[str, dict[str, Any]] = {
     "SlientTimes": make_silent_times_payload(),
     "SafeZones": make_safe_zones_payload(),
     "Chats": make_chats_payload(),
-    "GetDeviceCallLog": make_device_call_log_payload(),
+    "notifications": make_notifications_payload(),
     "UnReadChatMsgCount": make_unread_chat_msg_count_payload(),
     "UserSteps": make_user_steps_payload(),
     "CheckEmailOrPhoneExist": make_check_email_or_phone_exist_payload(),

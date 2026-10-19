@@ -2322,23 +2322,18 @@ class XploraWatchOverviewCard extends HTMLElement {
           })()
         : "";
 
-    // Call records come from the dedicated device call-log cache; power events may still be
-    // present in the recent chat feed. Keep this separate from the chat tile so opening it
+    // Call and power events come from the cached notification feed. Keep this separate from the chat tile so opening it
     // never marks chat messages as read.
     const messageEnt = st("messages");
     const activityRow = this._usable(messageEnt)
       ? (() => {
           const attrs = messageEnt.attributes || {};
           const entries = attrs.list;
-          const calls = Array.isArray(attrs.call_log_list)
+          const count = Array.isArray(attrs.call_log_list)
             ? attrs.call_log_list.length
             : Array.isArray(entries)
-              ? entries.filter((item) => item && item.type === "CALL_LOG").length
+              ? entries.filter((item) => item && ["CALL_LOG", "POWER_ON", "POWER_OFF"].includes(item.type)).length
               : null;
-          const powerEvents = Array.isArray(entries)
-            ? entries.filter((item) => item && ["POWER_ON", "POWER_OFF"].includes(item.type)).length
-            : null;
-          const count = calls === null || powerEvents === null ? null : calls + powerEvents;
           const sub = count === null ? "Recent calls and watch events" : `${count} event${count === 1 ? "" : "s"}`;
           return `<button class="row" data-call-log="${this._esc(map.messages)}">
                <ha-icon class="row-icon" icon="mdi:phone-log"></ha-icon>
@@ -4643,7 +4638,7 @@ window.customCards.push({
   preview: true,
 });
 
-/** A per-watch view of the dedicated call-log cache and recent power events. */
+/** A per-watch view of recent call and power events from Xplora notifications. */
 class XploraWatchCallLogCard extends HTMLElement {
   constructor() {
     super();
@@ -4682,13 +4677,12 @@ class XploraWatchCallLogCard extends HTMLElement {
   _locale() { return (this._hass && this._hass.locale && this._hass.locale.language) || navigator.language || "en"; }
   _events() {
     const attrs = this._attrs();
-    const calls = Array.isArray(attrs.call_log_list)
-      ? attrs.call_log_list.map((item) => ({ ...item, type: "CALL_LOG" }))
+    const events = Array.isArray(attrs.call_log_list)
+      ? attrs.call_log_list.map((item) => ({ ...item, type: item.type || "CALL_LOG" }))
       : Array.isArray(attrs.list)
-        ? attrs.list.filter((item) => item && item.type === "CALL_LOG")
+        ? attrs.list.filter((item) => item && ["CALL_LOG", "POWER_ON", "POWER_OFF"].includes(item.type))
         : [];
-    const powerEvents = Array.isArray(attrs.list) ? attrs.list.filter((item) => item && ["POWER_ON", "POWER_OFF"].includes(item.type)) : [];
-    return [...calls, ...powerEvents]
+    return events
       .slice()
       .sort((a, b) => this._stamp(b) - this._stamp(a));
   }
