@@ -15,7 +15,7 @@ import aiohttp
 
 from ..const import CHAT_READ_FLAG_UNREAD
 from .const import ALL_WATCH_FUNCTIONS, MISSING_LOCATION_TM, WatchFunction
-from .exception_classes import Error, ErrorMSG, LoginError
+from .exception_classes import AuthError, Error, ErrorMSG, LoginError
 from .gql_handler_async import GQLHandler
 from .model import Chats, ChatsNew, Data, SimpleChat, SmallChat, SmallChatList, User
 from .pyxplora import PyXplora
@@ -712,6 +712,12 @@ class PyXploraApi(PyXplora):
 
         try:
             response = await self._gql_handler.device_call_log_a(str(device_id))
+        except AuthError as error:
+            # A token-expired response from this auxiliary endpoint must not trigger
+            # account-wide token recovery: the same session may still serve the
+            # watch's other data. Report this endpoint failure so the coordinator
+            # preserves the call-log cache and continues refreshing other data.
+            return {"_error": str(error) or "Xplora call-history authentication failed"}
         except Error as error:
             # Call history is auxiliary to chats and device status. Keep the last
             # successful cache instead of failing a refresh that fetched other data.

@@ -6,6 +6,7 @@ from typing import Any
 
 from custom_components.xplora_watch.const import SENSOR_MESSAGE
 from custom_components.xplora_watch.coordinator import XploraDataUpdateCoordinator
+from custom_components.xplora_watch.pyxplora_api.exception_classes import AuthError
 from tests.xplora_watch.fixtures.graphql_payloads import DEFAULT_WUID
 
 
@@ -52,6 +53,23 @@ async def test_call_log_failure_preserves_previous_cached_records(
     cached = coordinator.data[DEFAULT_WUID][SENSOR_MESSAGE]
     assert cached["call_log_list"] == [old_call]
     assert cached["call_log_error"] == "Call log unavailable"
+
+
+async def test_expired_token_from_call_log_does_not_escape_as_account_reauth(
+    coordinator: XploraDataUpdateCoordinator,
+    graphql_operations: dict[str, dict[str, Any]],
+) -> None:
+    """An endpoint-specific auth error must not abort the whole integration refresh."""
+    old_call = {"time": "2026-10-18T16:18:13Z", "callName": "Previously cached"}
+    coordinator.data = {DEFAULT_WUID: {SENSOR_MESSAGE: {"list": [], "call_log_list": [old_call]}}}
+    graphql_operations["GetDeviceCallLog"] = {"errors": [{"code": "E000004", "message": "expired"}]}
+    await coordinator.controller.setDevices([DEFAULT_WUID], functions=frozenset())
+
+    await coordinator.message_data(DEFAULT_WUID, message_limit=10, remove_message=False)
+
+    cached = coordinator.data[DEFAULT_WUID][SENSOR_MESSAGE]
+    assert cached["call_log_list"] == [old_call]
+    assert "token expired" in cached["call_log_error"]
 
 
 async def test_nullable_call_logs_is_a_successful_empty_result(
