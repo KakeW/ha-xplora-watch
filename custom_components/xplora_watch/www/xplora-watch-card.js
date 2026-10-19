@@ -1485,6 +1485,7 @@ class CardPopupHost {
         "xplora-watch-chat-card": ".header-actions",
         "xplora-watch-map-card": ".map-banner",
         "xplora-watch-actions-card": ".header",
+        "xplora-watch-call-log-card": ".head",
       }[card.localName];
       if (selector) {
         const root = card.shadowRoot || card;
@@ -4745,16 +4746,16 @@ class XploraWatchCallLogCard extends HTMLElement {
     const apiError = this._attrs().call_log_error;
     this.shadowRoot.innerHTML = `
       <style>
-        :host { display:block; }
-        ha-card { overflow:hidden; }
-        .head { display:flex; align-items:center; gap:12px; padding:16px; border-bottom:1px solid var(--divider-color); }
+        :host { display:block; min-height:0; }
+        ha-card { overflow:hidden; display:flex; flex-direction:column; max-height:calc(100vh - 80px); }
+        .head { display:flex; align-items:center; gap:8px; padding:8px 12px 8px 16px; border-bottom:1px solid var(--divider-color); flex:0 0 auto; }
         .head ha-icon { color:var(--primary-color); --mdc-icon-size:24px; }
         .title { flex:1; min-width:0; font-size:1.15rem; font-weight:500; }
         button { display:inline-flex; align-items:center; justify-content:center; min-width:44px; min-height:44px; border:0; border-radius:50%; background:none; color:var(--primary-text-color); cursor:pointer; }
         button:hover { background:var(--secondary-background-color); }
         button[disabled] { opacity:.5; cursor:default; }
         .spin { animation: spin .9s linear infinite; }
-        .list { list-style:none; margin:0; padding:0; }
+        .list { list-style:none; margin:0; padding:0; max-height:60vh; overflow-y:auto; overscroll-behavior:contain; }
         .item { display:flex; gap:14px; padding:14px 16px; border-bottom:1px solid var(--divider-color); }
         .item:last-child { border-bottom:0; }
         .item ha-icon { flex:0 0 auto; margin-top:2px; color:var(--primary-color); --mdc-icon-size:22px; }

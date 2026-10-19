@@ -99,6 +99,7 @@ describe("history popup (date bar + calendar popover)", () => {
     ["xplora-watch-chat-card", ".header-actions", { entity: HIST }],
     ["xplora-watch-map-card", ".map-banner", { entity: "device_tracker.test" }],
     ["xplora-watch-actions-card", ".header", { entities: ["button.test"] }],
+    ["xplora-watch-call-log-card", ".head", { entity: HIST }],
   ])("embeds close in %s across header rebuilds", async (tag, selector, config) => {
     const hass = makeHass();
     hass.states["device_tracker.test"] = { state: "home", attributes: { latitude: 60, longitude: 24, xplora_role: "tracker" } };
