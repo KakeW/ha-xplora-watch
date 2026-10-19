@@ -32,7 +32,7 @@ describe("call log cache-first rendering", () => {
     expect(calls).toEqual([]);
   });
 
-  it("renders call records from the dedicated call-history cache", () => {
+  it("renders call direction and number clearly without exposing raw duration values", () => {
     const calls = [];
     const el = document.createElement("xplora-watch-call-log-card");
     el.setConfig({ entity: "sensor.watch_message" });
@@ -44,14 +44,20 @@ describe("call log cache-first rendering", () => {
           state: "ok",
           last_updated: "2026-10-19T10:00:00Z",
           attributes: {
-            call_log_list: [{
-              time: "2026-10-18T16:18:13Z",
-              callName: "Test contact",
-              callNumber: "+358401234567",
-              callType: "VOICE",
-              callMode: "OUTGOING",
-              duration: "00:02:14",
-            }],
+            call_log_list: [
+              {
+                time: "2026-10-18T16:18:13Z",
+                callName: "Isi",
+                callNumber: "+358401234567",
+                callType: 1,
+                callMode: 2,
+                duration: 1792402190,
+              },
+              {
+                time: "2026-10-18T17:18:13Z",
+                data: { call_name: "Amanda", call_number: "+358501234567", call_type: "2", call_time: 1792405790 },
+              },
+            ],
             list: [],
           },
         },
@@ -59,9 +65,16 @@ describe("call log cache-first rendering", () => {
       callService: async (...args) => calls.push(args),
     };
 
-    expect(el.shadowRoot.textContent).toContain("Call · Test contact");
-    expect(el.shadowRoot.textContent).toContain("00:02:14");
-    expect(el.shadowRoot.textContent).toContain("OUTGOING");
+    expect(el.shadowRoot.textContent).toContain("Lapsi soitti · Isi");
+    expect(el.shadowRoot.textContent).toContain("Lapselle soitettiin · Amanda");
+    expect(el.shadowRoot.textContent).toContain("Numero: +358401234567");
+    expect(el.shadowRoot.textContent).toContain("Numero: +358501234567");
+    expect(el.shadowRoot.textContent).not.toContain("1792402190");
+    expect(el.shadowRoot.textContent).not.toContain("1792405790");
+    expect(el.shadowRoot.textContent).not.toContain("Call mode");
+    const callIcons = [...el.shadowRoot.querySelectorAll("li ha-icon")];
+    expect(callIcons.map((icon) => icon.getAttribute("icon"))).toEqual(["mdi:phone-incoming", "mdi:phone-outgoing"]);
+    expect(callIcons.every((icon) => icon.classList.contains("call-direction"))).toBe(true);
     expect(el.shadowRoot.textContent).toContain(new Date("2026-10-18T16:18:13Z").toLocaleString());
     expect(calls).toEqual([]);
   });

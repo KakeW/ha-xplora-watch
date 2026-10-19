@@ -4702,23 +4702,25 @@ class XploraWatchCallLogCard extends HTMLElement {
     if (item.type === "POWER_ON") return "Watch switched on";
     if (item.type === "POWER_OFF") return "Watch switched off";
     const name = item.callName || (item.data && item.data.call_name);
-    return name ? `Call · ${name}` : "Call";
+    const callType = Number(item.callType != null ? item.callType : item.data && item.data.call_type);
+    const direction = callType === 1 ? "Lapsi soitti" : callType === 2 ? "Lapselle soitettiin" : "Puhelu";
+    return name ? `${direction} · ${name}` : direction;
   }
-  _details(item) {
+  _callNumber(item) {
     if (item.type !== "CALL_LOG") return "";
     const data = item.data || {};
-    const details = [];
-    const duration = item.duration != null && item.duration !== "" ? item.duration : data.call_time;
-    if (duration != null && duration !== "") {
-      details.push(item.duration != null ? `Duration: ${duration}` : `Duration (API value): ${duration}`);
-    }
-    const callType = item.callType || data.call_type;
-    const callMode = item.callMode || data.call_mode;
-    const callNumber = item.callNumber || data.call_number;
-    if (callType) details.push(`Call type: ${callType}`);
-    if (callMode) details.push(`Call mode: ${callMode}`);
-    if (callNumber) details.push(callNumber);
-    return details.join(" · ");
+    return item.callNumber || data.call_number || "";
+  }
+  _icon(item) {
+    if (item.type === "POWER_ON") return "mdi:power";
+    if (item.type === "POWER_OFF") return "mdi:power-off";
+    const callType = Number(item.callType != null ? item.callType : item.data && item.data.call_type);
+    return callType === 1 ? "mdi:phone-outgoing" : callType === 2 ? "mdi:phone-incoming" : "mdi:phone";
+  }
+  _iconClass(item) {
+    return item.type === "CALL_LOG" && [1, 2].includes(Number(item.callType != null ? item.callType : item.data && item.data.call_type))
+      ? "event-icon call-direction"
+      : "event-icon";
   }
   async _refresh() {
     const attrs = this._attrs();
@@ -4756,6 +4758,7 @@ class XploraWatchCallLogCard extends HTMLElement {
         .item { display:flex; gap:14px; padding:14px 16px; border-bottom:1px solid var(--divider-color); }
         .item:last-child { border-bottom:0; }
         .item ha-icon { flex:0 0 auto; margin-top:2px; color:var(--primary-color); --mdc-icon-size:22px; }
+        .item ha-icon.call-direction { color:var(--success-color, #43a047); }
         .body { flex:1; min-width:0; }
         .main { font-weight:500; overflow-wrap:anywhere; }
         .time,.detail,.scope { margin-top:4px; color:var(--secondary-text-color); font-size:.88rem; }
@@ -4770,12 +4773,12 @@ class XploraWatchCallLogCard extends HTMLElement {
           </button>
         </div>
         ${this._error && !events.length ? `<div class="empty">Could not load call events. Use refresh to try again.</div>` : events.length ? `<ul class="list">${events.map((item) => {
-          const icon = item.type === "CALL_LOG" ? "mdi:phone" : item.type === "POWER_ON" ? "mdi:power" : "mdi:power-off";
-          const details = this._details(item);
-          return `<li class="item"><ha-icon icon="${icon}"></ha-icon><div class="body">
+          const icon = this._icon(item);
+          const callNumber = this._callNumber(item);
+          return `<li class="item"><ha-icon class="${this._iconClass(item)}" icon="${icon}"></ha-icon><div class="body">
             <div class="main">${this._esc(this._title(item))}</div>
             <div class="time">${this._esc(this._time(item))}</div>
-            ${details ? `<div class="detail">${this._esc(details)}</div>` : ""}
+            ${callNumber ? `<div class="detail">Numero: ${this._esc(callNumber)}</div>` : ""}
         </div></li>`;
         }).join("")}</ul>` : `<div class="empty">${apiError ? `Could not load call history: ${this._esc(apiError)}` : this._fetching || !loaded ? "Loading recent events…" : "No call or power events were returned by Xplora."}</div>`}
         <div class="scope">Calls come from Xplora’s device call-history API; power events, when present, come from the recent message feed.</div>
