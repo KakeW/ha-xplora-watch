@@ -124,7 +124,7 @@
           "auto_fetch_history": "Cuando está activado, la integración vuelve a obtener a la 01:00 el historial de ubicaciones del día anterior y lo combina con el historial guardado. Así se incluyen las posiciones que Xplora publica después de finalizar el día.",
           "refresh_on_card_render": "Cuando está activado, las tarjetas solicitan datos actualizados al mostrarse (alarmas, tiempos silenciosos y ubicación). Los mensajes se leen de la caché local y se actualizan con una notificación push o una actualización manual.",
           "account_alias": "Renombra el dispositivo del reloj de esta cuenta en la próxima recarga (p. ej. «Dana Watch (Mamá)»). Los identificadores de entidad existentes conservan su nombre original, por lo que las automatizaciones y los paneles que los referencian siguen funcionando.",
-          "push_notifications": "Receive new chat events without polling. May replace the Xplora app's push recipient. Configure an HA automation to forward events to your phone."
+          "push_notifications": "Receive Xplora chat and activity push events without polling. Activity events use xplora_watch_activity; chat messages use xplora_watch_message. This may replace the Xplora app's push recipient."
         },
         "title": "configuraciones adicionales para HA Xplora® Watch"
       }

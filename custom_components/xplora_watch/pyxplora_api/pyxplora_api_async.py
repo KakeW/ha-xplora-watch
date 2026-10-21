@@ -704,7 +704,7 @@ class PyXploraApi(PyXplora):
         return ChatsNew.from_dict(chats_new, infer_missing=True) if asObject else chats_new
 
     async def getWatchCallLog(self, wuid: str) -> dict[str, Any]:
-        """Fetch call and power events from the app's per-ward notification feed."""
+        """Fetch recent activity events from the app's per-ward notification feed."""
         try:
             response = await self._gql_handler.notification_list_a(wuid)
         except AuthError as error:
@@ -719,11 +719,7 @@ class PyXploraApi(PyXplora):
         result = (response.get("data") or {}).get("notifications")
         if not isinstance(result, dict) or "list" not in result:
             return {"_error": "Notification response did not contain a list"}
-        events = [
-            item
-            for item in (result.get("list") or [])
-            if isinstance(item, dict) and item.get("type") in {"CALL_LOG", "POWER_ON", "POWER_OFF"}
-        ]
+        events = [item for item in (result.get("list") or []) if isinstance(item, dict)]
         return {"list": events}
 
     ##### Watch Location Info #####

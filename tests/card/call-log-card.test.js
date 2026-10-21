@@ -6,8 +6,8 @@ beforeAll(async () => {
   await loadBundle();
 });
 
-describe("call log cache-first rendering", () => {
-  it("renders cached call events without requesting the server on open", () => {
+describe("activity log cache-first rendering", () => {
+  it("renders cached events without requesting the server on open", () => {
     const calls = [];
     const el = document.createElement("xplora-watch-call-log-card");
     el.setConfig({ entity: "sensor.watch_message" });
@@ -44,7 +44,7 @@ describe("call log cache-first rendering", () => {
           state: "ok",
           last_updated: "2026-10-19T10:00:00Z",
           attributes: {
-            call_log_list: [
+            activity_list: [
               {
                 time: "2026-10-18T16:18:13Z",
                 callName: "Isi",
@@ -76,7 +76,33 @@ describe("call log cache-first rendering", () => {
     expect(callIcons.map((icon) => icon.getAttribute("icon"))).toEqual(["mdi:phone-incoming", "mdi:phone-outgoing"]);
     expect(callIcons.every((icon) => icon.classList.contains("call-direction"))).toBe(true);
     expect(el.shadowRoot.textContent).toContain(new Date("2026-10-18T16:18:13Z").toLocaleString());
+    expect(el.shadowRoot.textContent).toContain("Activity log");
     expect(calls).toEqual([]);
+  });
+
+  it("renders SOS and other notification types in the activity log", () => {
+    const el = document.createElement("xplora-watch-call-log-card");
+    el.setConfig({ entity: "sensor.watch_message" });
+    document.body.appendChild(el);
+    el.hass = {
+      states: {
+        "sensor.watch_message": {
+          entity_id: "sensor.watch_message",
+          state: "ok",
+          last_updated: "2026-10-19T10:00:00Z",
+          attributes: {
+            activity_list: [
+              { type: "SOS", msgId: "sos-1", create: 1792402190 },
+              { type: "SAFE_ZONE_ENTER", msgId: "zone-1", create: 1792402191 },
+            ],
+          },
+        },
+      },
+      callService: async () => {},
+    };
+
+    expect(el.shadowRoot.textContent).toContain("SOS alert");
+    expect(el.shadowRoot.textContent).toContain("Safe zone enter");
   });
 
   it("renders cached power events without duplicating the chat-feed copy", () => {
@@ -89,7 +115,7 @@ describe("call log cache-first rendering", () => {
         "sensor.watch_message": {
           entity_id: "sensor.watch_message",
           state: "ok",
-          attributes: { call_log_list: [event], list: [event] },
+          attributes: { activity_list: [event], call_log_list: [event], list: [event] },
         },
       },
       callService: async () => {},

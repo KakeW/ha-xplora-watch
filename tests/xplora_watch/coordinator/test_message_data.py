@@ -30,5 +30,5 @@ async def test_message_data_leaves_other_wuids_untouched(
     assert coordinator.data[DEFAULT_WUID] == {
         "battery": 80,
         "isOnline": True,
-        SENSOR_MESSAGE: {"list": [], "call_log_list": []},
+        SENSOR_MESSAGE: {"list": [], "activity_list": [], "call_log_list": []},
     }

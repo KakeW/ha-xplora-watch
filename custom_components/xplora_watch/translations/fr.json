@@ -124,7 +124,7 @@
           "auto_fetch_history": "Lorsque cette option est activée, l'intégration récupère de nouveau à 01:00 l'historique de la veille et le fusionne avec le trajet enregistré. Les positions que Xplora rend disponibles après la fin de la journée sont ainsi ajoutées.",
           "refresh_on_card_render": "Lorsque cette option est activée, les cartes demandent des données à l'affichage (alarmes, plages silencieuses et position). Les messages sont lus depuis le cache local et actualisés par notification push ou actualisation manuelle.",
           "account_alias": "Renomme l'appareil montre de ce compte au prochain rechargement (par ex. « Dana Watch (Maman) »). Les identifiants d'entités existants conservent leur nom d'origine, afin que les automatisations et tableaux de bord qui les référencent continuent de fonctionner.",
-          "push_notifications": "Receive new chat events without polling. May replace the Xplora app's push recipient. Configure an HA automation to forward events to your phone."
+          "push_notifications": "Receive Xplora chat and activity push events without polling. Activity events use xplora_watch_activity; chat messages use xplora_watch_message. This may replace the Xplora app's push recipient."
         },
         "title": "paramètres supplémentaires pour HA Xplora® Watch"
       }

@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
 
-from custom_components.xplora_watch.push import EVENT_MESSAGE, XploraPush, parse_message
+from custom_components.xplora_watch.push import EVENT_ACTIVITY, EVENT_MESSAGE, XploraPush, parse_activity, parse_message
 
 
 @pytest.fixture(autouse=True)
@@ -34,6 +34,18 @@ async def test_incoming_prefetches_without_waiting_for_card(hass, coordinator, p
     await asyncio.gather(*receiver.refresh_tasks.values())
     assert prefetch.await_args.args == (coordinator, "watch-test")
     assert prefetch.await_args.kwargs["chats"]["list"][0]["msgId"] == "123"
+    await receiver.stop()
+
+
+async def test_non_chat_push_emits_activity_and_prefetches_all_watch_caches(hass, coordinator, prefetch):
+    receiver = XploraPush(hass, coordinator, "test")
+    events = []
+    hass.bus.async_listen(EVENT_ACTIVITY, lambda event: events.append(event.data))
+    receiver.received({"data": {"content": json.dumps({"type": "SOS", "id": "sos-1", "sender": "watch-test"})}}, None, None)
+    await receiver.consume(await receiver.queue.get())
+    await asyncio.gather(*receiver.refresh_tasks.values())
+    assert events == [{"entry_id": "test", "event_type": "SOS", "event_id": "sos-1", "sender_id": "watch-test"}]
+    assert {call.args[1] for call in prefetch.await_args_list} == {"watch-test"}
     await receiver.stop()
 
 
@@ -131,6 +143,16 @@ def test_live_shape():
     assert message["text"] == "Hello"
     assert message["message_id"] == "123"
     assert "receiver" not in message
+
+
+def test_activity_push_shape_is_allowlisted():
+    payload = {"data": {"content": json.dumps({"type": "SOS", "id": "sos-1", "sender": "watch-test", "secret": "discard"})}}
+    assert parse_activity(payload) == {"event_type": "SOS", "event_id": "sos-1", "sender_id": "watch-test"}
+    assert parse_activity({"data": {"event_type": "SOS_ALERT"}}, "fcm-id") == {
+        "event_type": "SOS_ALERT",
+        "event_id": "fcm-id",
+        "sender_id": "",
+    }
 
 
 @pytest.mark.parametrize(

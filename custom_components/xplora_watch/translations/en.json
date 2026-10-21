@@ -124,7 +124,7 @@
           "auto_fetch_history": "When on, the integration re-fetches the previous day's location track at 01:00 local time and merges it into the saved track. This captures positions Xplora makes available only after the day has ended.",
           "refresh_on_card_render": "When on, the custom dashboard cards request fresh data as soon as they are shown (alarms and silent times, and location). Messages are read from the local cache and refreshed by push or an explicit update. Off by default to minimise API traffic.",
           "account_alias": "Renames this account's watch device (e.g. “Dana Watch (Mom)”) on the next reload. Existing entity ids keep their original name, so automations and dashboards that reference them keep working.",
-          "push_notifications": "Receive new chat events without polling. May replace the Xplora app's push recipient. Configure an HA automation to forward events to your phone."
+          "push_notifications": "Receive Xplora chat and activity push events without polling. Activity events use xplora_watch_activity; chat messages use xplora_watch_message. This may replace the Xplora app's push recipient."
         },
         "title": "further settings for HA Xplora® Watch"
       }

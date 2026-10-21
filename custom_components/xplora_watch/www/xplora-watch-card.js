@@ -2323,23 +2323,25 @@ class XploraWatchOverviewCard extends HTMLElement {
           })()
         : "";
 
-    // Call and power events come from the cached notification feed. Keep this separate from the chat tile so opening it
+    // Xplora events come from the cached notification feed. Keep this separate from the chat tile so opening it
     // never marks chat messages as read.
     const messageEnt = st("messages");
     const activityRow = this._usable(messageEnt)
       ? (() => {
           const attrs = messageEnt.attributes || {};
           const entries = attrs.list;
-          const count = Array.isArray(attrs.call_log_list)
-            ? attrs.call_log_list.length
+          const count = Array.isArray(attrs.activity_list)
+            ? attrs.activity_list.length
+            : Array.isArray(attrs.call_log_list)
+              ? attrs.call_log_list.length
             : Array.isArray(entries)
               ? entries.filter((item) => item && ["CALL_LOG", "POWER_ON", "POWER_OFF"].includes(item.type)).length
               : null;
-          const sub = count === null ? "Recent calls and watch events" : `${count} event${count === 1 ? "" : "s"}`;
+          const sub = count === null ? "Recent watch activity" : `${count} event${count === 1 ? "" : "s"}`;
           return `<button class="row" data-call-log="${this._esc(map.messages)}">
-               <ha-icon class="row-icon" icon="mdi:phone-log"></ha-icon>
+               <ha-icon class="row-icon" icon="mdi:timeline-clock"></ha-icon>
                <div class="row-text">
-                 <div class="row-main">Call log</div>
+                 <div class="row-main">Activity log</div>
                  <div class="row-sub">${this._esc(sub)}</div>
                </div>
                <ha-icon class="row-chevron" icon="mdi:chevron-right"></ha-icon>
@@ -4639,7 +4641,7 @@ window.customCards.push({
   preview: true,
 });
 
-/** A per-watch view of recent call and power events from Xplora notifications. */
+/** A per-watch view of recent events from Xplora notifications. */
 class XploraWatchCallLogCard extends HTMLElement {
   constructor() {
     super();
@@ -4678,10 +4680,12 @@ class XploraWatchCallLogCard extends HTMLElement {
   _locale() { return (this._hass && this._hass.locale && this._hass.locale.language) || navigator.language || "en"; }
   _events() {
     const attrs = this._attrs();
-    const events = Array.isArray(attrs.call_log_list)
-      ? attrs.call_log_list.map((item) => ({ ...item, type: item.type || "CALL_LOG" }))
+    const events = Array.isArray(attrs.activity_list)
+      ? attrs.activity_list.map((item) => ({ ...item, type: item.type || "CALL_LOG" }))
+      : Array.isArray(attrs.call_log_list)
+      ? attrs.call_log_list
       : Array.isArray(attrs.list)
-        ? attrs.list.filter((item) => item && ["CALL_LOG", "POWER_ON", "POWER_OFF"].includes(item.type))
+        ? attrs.list
         : [];
     return events
       .slice()
@@ -4702,10 +4706,15 @@ class XploraWatchCallLogCard extends HTMLElement {
   _title(item) {
     if (item.type === "POWER_ON") return "Watch switched on";
     if (item.type === "POWER_OFF") return "Watch switched off";
-    const name = item.callName || (item.data && item.data.call_name);
-    const callType = Number(item.callType != null ? item.callType : item.data && item.data.call_type);
-    const direction = callType === 1 ? "Lapsi soitti" : callType === 2 ? "Lapselle soitettiin" : "Puhelu";
-    return name ? `${direction} · ${name}` : direction;
+    if (item.type === "CALL_LOG") {
+      const name = item.callName || (item.data && item.data.call_name);
+      const callType = Number(item.callType != null ? item.callType : item.data && item.data.call_type);
+      const direction = callType === 1 ? "Lapsi soitti" : callType === 2 ? "Lapselle soitettiin" : "Puhelu";
+      return name ? `${direction} · ${name}` : direction;
+    }
+    if (item.type === "SOS") return "SOS alert";
+    const label = String(item.type || "Activity").replace(/[_-]+/g, " ").toLowerCase();
+    return label.charAt(0).toUpperCase() + label.slice(1);
   }
   _callNumber(item) {
     if (item.type !== "CALL_LOG") return "";
@@ -4715,6 +4724,8 @@ class XploraWatchCallLogCard extends HTMLElement {
   _icon(item) {
     if (item.type === "POWER_ON") return "mdi:power";
     if (item.type === "POWER_OFF") return "mdi:power-off";
+    if (item.type === "SOS") return "mdi:alarm-light";
+    if (item.type !== "CALL_LOG") return "mdi:bell-outline";
     const callType = Number(item.callType != null ? item.callType : item.data && item.data.call_type);
     return callType === 1 ? "mdi:phone-outgoing" : callType === 2 ? "mdi:phone-incoming" : "mdi:phone";
   }
@@ -4742,8 +4753,8 @@ class XploraWatchCallLogCard extends HTMLElement {
   _render() {
     if (!this.shadowRoot) return;
     const events = this._events();
-    const loaded = Array.isArray(this._attrs().call_log_list) || Array.isArray(this._attrs().list);
-    const apiError = this._attrs().call_log_error;
+    const loaded = Array.isArray(this._attrs().activity_list) || Array.isArray(this._attrs().call_log_list) || Array.isArray(this._attrs().list);
+    const apiError = this._attrs().activity_error || this._attrs().call_log_error;
     this.shadowRoot.innerHTML = `
       <style>
         :host { display:block; min-height:0; }
@@ -4768,12 +4779,12 @@ class XploraWatchCallLogCard extends HTMLElement {
         @keyframes spin { to { transform:rotate(360deg); } }
       </style>
       <ha-card>
-        <div class="head"><ha-icon icon="mdi:phone-log"></ha-icon><div class="title">Call log</div>
+        <div class="head"><ha-icon icon="mdi:timeline-clock"></ha-icon><div class="title">Activity log</div>
           <button class="refresh" aria-label="Refresh" title="Refresh" ${this._fetching ? "disabled" : ""}>
             <ha-icon class="${this._fetching ? "spin" : ""}" icon="mdi:refresh"></ha-icon>
           </button>
         </div>
-        ${this._error && !events.length ? `<div class="empty">Could not load call events. Use refresh to try again.</div>` : events.length ? `<ul class="list">${events.map((item) => {
+        ${this._error && !events.length ? `<div class="empty">Could not load activity. Use refresh to try again.</div>` : events.length ? `<ul class="list">${events.map((item) => {
           const icon = this._icon(item);
           const callNumber = this._callNumber(item);
           return `<li class="item"><ha-icon class="${this._iconClass(item)}" icon="${icon}"></ha-icon><div class="body">
@@ -4781,8 +4792,8 @@ class XploraWatchCallLogCard extends HTMLElement {
             <div class="time">${this._esc(this._time(item))}</div>
             ${callNumber ? `<div class="detail">Numero: ${this._esc(callNumber)}</div>` : ""}
         </div></li>`;
-        }).join("")}</ul>` : `<div class="empty">${apiError ? `Could not load call history: ${this._esc(apiError)}` : this._fetching || !loaded ? "Loading recent events…" : "No call or power events were returned by Xplora."}</div>`}
-        <div class="scope">Calls come from Xplora’s device call-history API; power events, when present, come from the recent message feed.</div>
+        }).join("")}</ul>` : `<div class="empty">${apiError ? `Could not load activity: ${this._esc(apiError)}` : this._fetching || !loaded ? "Loading recent events…" : "No events were returned by Xplora."}</div>`}
+        <div class="scope">Recent events are loaded from Xplora’s notification feed.</div>
       </ha-card>`;
     const refresh = this.shadowRoot.querySelector(".refresh");
     if (refresh) refresh.addEventListener("click", () => this._refresh());

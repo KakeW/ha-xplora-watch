@@ -21,6 +21,7 @@ from .pyxplora_api.gql_mutations import FCM_M
 
 CONF_PUSH = "push_notifications"
 EVENT_MESSAGE = "xplora_watch_message"
+EVENT_ACTIVITY = "xplora_watch_activity"
 # Message types present in the official iOS bundle; only text has a live fixture so far.
 CHAT_TYPES = {"chat_text", "chat_voice", "chat_emoticon", "chat_image", "chat_video"}
 _LOGGER = logging.getLogger(__name__)
@@ -51,6 +52,27 @@ def parse_message(payload: Any) -> dict[str, str] | None:
         return None
 
 
+def parse_activity(payload: Any, persistent_id: Any = None) -> dict[str, str] | None:
+    """Extract a minimal non-chat event envelope without retaining raw push data."""
+    try:
+        data = payload["data"]
+        content = data.get("content", data)
+        content = json.loads(content) if isinstance(content, str) else content
+        if not isinstance(content, dict):
+            return None
+        kind = content.get("type") or content.get("msg_type") or content.get("event_type") or "unknown"
+        if not isinstance(kind, str) or kind in CHAT_TYPES:
+            return None
+        event_id = content.get("msg_id") or content.get("id") or content.get("event_id") or content.get("notification_id") or persistent_id
+        return {
+            "event_type": kind,
+            "event_id": str(event_id or ""),
+            "sender_id": str(content.get("sender") or content.get("uid") or ""),
+        }
+    except (ValueError, TypeError, KeyError, AttributeError):
+        return None
+
+
 class XploraPush:
     """Persist registration and deduplication; supervise the library's connection."""
 
@@ -74,6 +96,12 @@ class XploraPush:
 
     def received(self, payload: Any, _persistent_id: Any, _context: Any) -> None:
         message = parse_message(payload)
+        if message:
+            message["_kind"] = "chat"
+        else:
+            message = parse_activity(payload, _persistent_id)
+            if message:
+                message["_kind"] = "activity"
         if message and not self.stopping:
             try:
                 self.queue.put_nowait(message)
@@ -82,6 +110,9 @@ class XploraPush:
 
     async def consume(self, message: dict[str, str]) -> None:
         """Serialize delivery and persist before publishing to suppress replay after restart."""
+        if message.pop("_kind", "chat") == "activity":
+            await self.consume_activity(message)
+            return
         key = message["sender_id"] + ":" + message["message_id"]
         seen = self.state.get("seen", [])
         if key in seen:
@@ -144,6 +175,27 @@ class XploraPush:
             message = {**message, "message_type": "chat_unknown", "text": ""}
         self.hass.bus.async_fire(EVENT_MESSAGE, {"entry_id": self.entry_id, **message})
 
+    async def consume_activity(self, activity: dict[str, str]) -> None:
+        """Notify HA of a non-chat push and warm every watch's local event/message cache."""
+        key = f"activity:{activity['sender_id']}:{activity['event_type']}:{activity['event_id']}"
+        seen = self.state.get("seen", [])
+        if activity["event_id"] and key in seen:
+            return
+        if activity["event_id"]:
+            self.state["seen"] = (seen + [key])[-2048:]
+            await self.store.async_save(self.state)
+
+        watches = self.coordinator._configured_wuids
+        sender = activity.get("sender_id", "")
+        targets = [sender] if sender in watches else watches
+        self.hass.bus.async_fire(EVENT_ACTIVITY, {"entry_id": self.entry_id, **activity})
+        for wuid in targets:
+            self.refresh_pending.add(wuid)
+            if wuid not in self.refresh_tasks:
+                self.refresh_tasks[wuid] = self.hass.async_create_background_task(
+                    self.refresh_messages(wuid), f"Xplora activity {wuid}"
+                )
+
     async def refresh_messages(self, wuid: str) -> None:
         """Warm the thread and media cache; coalesce bursts per watch."""
         from .services import XploraMessageSensorUpdateService
@@ -170,8 +222,8 @@ class XploraPush:
                     await self.connect()
                     while not self.stopping:
                         try:
-                            message = await asyncio.wait_for(self.queue.get(), 60)
-                            await self.consume(message)
+                            notification = await asyncio.wait_for(self.queue.get(), 60)
+                            await self.consume(notification)
                         except TimeoutError:
                             if self.client.run_state.name == "STOPPED" or any(task.done() for task in self.client.tasks):
                                 raise ConnectionError("Push receiver stopped")

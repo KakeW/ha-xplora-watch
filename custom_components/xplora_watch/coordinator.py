@@ -994,15 +994,23 @@ class XploraDataUpdateCoordinator(DataUpdateCoordinator):
             message_cache = watch_data[wuid][SENSOR_MESSAGE]
             previous_message_cache = (self.data or {}).get(wuid, {}).get(SENSOR_MESSAGE) or {}
             if call_log_result is not None and not call_log_result.get("_error"):
-                message_cache["call_log_list"] = call_log_result.get("list") or []
+                activity_list = call_log_result.get("list") or []
+                message_cache["activity_list"] = activity_list
+                message_cache["call_log_list"] = activity_list  # Backwards compatibility for existing cards.
+                message_cache.pop("activity_error", None)
                 message_cache.pop("call_log_error", None)
             else:
-                # Preserve the last successful call history through API errors and lean polls.
-                message_cache["call_log_list"] = previous_message_cache.get("call_log_list", [])
+                # Preserve the last successful activity feed through API errors and lean polls.
+                activity_list = previous_message_cache.get("activity_list", previous_message_cache.get("call_log_list", []))
+                message_cache["activity_list"] = activity_list
+                message_cache["call_log_list"] = activity_list
                 if call_log_result and call_log_result.get("_error"):
+                    message_cache["activity_error"] = call_log_result["_error"]
                     message_cache["call_log_error"] = call_log_result["_error"]
-                elif previous_message_cache.get("call_log_error"):
-                    message_cache["call_log_error"] = previous_message_cache["call_log_error"]
+                elif previous_message_cache.get("activity_error") or previous_message_cache.get("call_log_error"):
+                    error = previous_message_cache.get("activity_error", previous_message_cache.get("call_log_error"))
+                    message_cache["activity_error"] = error
+                    message_cache["call_log_error"] = error
             # Record the per-watch update outcome. A primary guardian drives location tracking, so
             # the watch accepting the locate request (ok) vs. being off / out of reach (no_response)
             # is a real signal worth surfacing. A secondary guardian frequently cannot trigger a
@@ -1675,11 +1683,17 @@ class XploraDataUpdateCoordinator(DataUpdateCoordinator):
                 previous = watch_data.get("unreadMsg")
                 watch_data["unreadMsg"] = max(previous if isinstance(previous, int) else 0, unread)
             if not call_log_result.get("_error"):
-                chats["call_log_list"] = call_log_result.get("list") or []
+                chats["activity_list"] = call_log_result.get("list") or []
+                chats["call_log_list"] = chats["activity_list"]  # Backwards compatibility for existing cards.
+                chats.pop("activity_error", None)
                 chats.pop("call_log_error", None)
             else:
-                # A failed call-history request must not erase the last successful cache.
-                chats["call_log_list"] = (watch_data.get(SENSOR_MESSAGE) or {}).get("call_log_list", [])
+                # A failed activity request must not erase the last successful cache.
+                old_cache = watch_data.get(SENSOR_MESSAGE) or {}
+                activities = old_cache.get("activity_list", old_cache.get("call_log_list", []))
+                chats["activity_list"] = activities
+                chats["call_log_list"] = activities
+                chats["activity_error"] = call_log_result["_error"]
                 chats["call_log_error"] = call_log_result["_error"]
             watch_data[SENSOR_MESSAGE] = chats
             watch_entry[wuid] = watch_data
