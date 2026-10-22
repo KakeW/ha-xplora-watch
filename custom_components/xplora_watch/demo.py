@@ -539,6 +539,10 @@ class DemoPyXploraApi(PyXploraApi):
             "watch_last_location": watch_last_location,
         }
 
+    async def getWatchCallLog(self, wuid: str) -> dict[str, Any]:
+        """Return an empty local activity feed without contacting Xplora."""
+        return {"list": []}
+
     async def getWatchChatsRaw(self, wuid: str, *args: Any, **kwargs: Any) -> dict[str, Any]:
         """Demo chat messages for this account's watch, so the message card has something to render.
 

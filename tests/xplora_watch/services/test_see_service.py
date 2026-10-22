@@ -22,7 +22,7 @@ async def test_targeted_device_refreshes_its_watch(hass: HomeAssistant, coordina
     with patch.object(coordinator, "async_update_xplora_data", new=AsyncMock()) as mock_update:
         await hass.services.async_call(DOMAIN, ATTR_SERVICE_SEE, {"device_id": [devices[DEFAULT_WUID]]}, blocking=True)
 
-    mock_update.assert_awaited_once_with([DEFAULT_WUID], include_chats=True)
+    mock_update.assert_awaited_once_with([DEFAULT_WUID], force_functions=True, include_chats=True)
 
 
 async def test_no_device_target_raises_and_skips_update(hass: HomeAssistant, coordinator: XploraDataUpdateCoordinator) -> None:

@@ -213,6 +213,15 @@ refresh_functions:
       required: true
       selector: *id001
   name: Refresh alarms/silents/safe zones
+refresh_cache:
+  description: Refresh the watch status, chats and activity feed unless a recent push or card refresh already updated the local cache.
+  fields:
+    device_id:
+      description: The Xplora® watch(es) this action applies to.
+      name: Watch(es)
+      required: true
+      selector: *id001
+  name: Refresh watch cache
 see:
   description: 'Manually refresh the watch''s live status: location, battery, charging, online status
     and steps (the data from the watch''s device list). Other data has its own services and is not refreshed

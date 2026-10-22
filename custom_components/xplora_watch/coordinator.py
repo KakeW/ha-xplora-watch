@@ -107,6 +107,7 @@ _HISTORY_CONSUMERS: tuple[tuple[Platform, str], ...] = ((Platform.SENSOR, f"_{AT
 # Version of the persisted-session storage schema (HA `Store`). Bump if `dump_session`'s shape
 # changes incompatibly; an unreadable/old blob is ignored and the integration just logs in again.
 STORAGE_VERSION = 1
+AUTOMATIC_REFRESH_TTL = timedelta(seconds=30)
 
 
 async def async_clear_auth_session_store(hass: HomeAssistant, entry_id: str) -> None:
@@ -207,6 +208,10 @@ class XploraDataUpdateCoordinator(DataUpdateCoordinator):
         # launching their own. This is the authoritative dedup; the cards' render-time guard is now
         # just a UX nicety on top of it. Keyed entries are removed as soon as the fetch settles.
         self._inflight_updates: dict[tuple[tuple[str, ...] | None, bool, bool], asyncio.Task[dict[str, Any]]] = {}
+        # Pushes and dashboard-render requests share one per-watch refresh and a short freshness
+        # window. Manual refreshes intentionally do not use this gate.
+        self._watch_refresh_tasks: dict[str, asyncio.Task[dict[str, Any]]] = {}
+        self._watch_refreshed_at: dict[str, datetime] = {}
         # The fetch pipeline below still uses coordinator instance fields (`self.device`, battery,
         # location, etc.) as scratch state while it awaits network calls. Different request
         # signatures are intentionally not coalesced, but they must not execute that stateful
@@ -912,6 +917,35 @@ class XploraDataUpdateCoordinator(DataUpdateCoordinator):
         action (the `xplora_watch.refresh_functions` service or tapping the overview card).
         """
         return await self.async_update_xplora_data(targets=targets, force_functions=True)
+
+    async def async_refresh_watch_cache(
+        self, wuid: str, *, include_chats: bool = True, force: bool = False
+    ) -> dict[str, Any]:
+        """Refresh one watch's cache once, coalescing pushes and card opens for 30 seconds.
+
+        The ordinary status/location feed and (optionally) chats/activity feed are refreshed
+        together. Function data continues to obey its own lower-frequency policy. Explicit manual
+        refreshes use ``async_update_xplora_data`` directly and never pass through this gate.
+        """
+        existing = self._watch_refresh_tasks.get(wuid)
+        if existing is not None and not existing.done():
+            return await existing
+        refreshed = self._watch_refreshed_at.get(wuid)
+        if not force and refreshed is not None and datetime.now() - refreshed < AUTOMATIC_REFRESH_TTL:
+            return self.data or {}
+
+        task = self.hass.async_create_task(
+            self.async_update_xplora_data([wuid], include_chats=include_chats)
+        )
+        task.add_done_callback(lambda t: t.cancelled() or t.exception())
+        self._watch_refresh_tasks[wuid] = task
+        try:
+            result = await task
+            self._watch_refreshed_at[wuid] = datetime.now()
+            return result
+        finally:
+            if self._watch_refresh_tasks.get(wuid) is task:
+                self._watch_refresh_tasks.pop(wuid, None)
 
     async def data_loop(
         self,

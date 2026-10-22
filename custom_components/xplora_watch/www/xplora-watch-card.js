@@ -52,6 +52,7 @@ const SERVICE = Object.freeze({
   TURN_ALL_SILENTS_ON: "turn_all_silents_on",
   TURN_ALL_SILENTS_OFF: "turn_all_silents_off",
   REFRESH_FUNCTIONS: "refresh_functions",
+  REFRESH_CACHE: "refresh_cache",
 });
 
 // Attribute name the integration surfaces on EVERY watch entity (Python side:
@@ -431,11 +432,10 @@ class XploraWatchCard extends HTMLElement {
 
   /* -------------------------------------------------------------- services */
 
-  // Dedup key for this watch's functions refresh -- shared across every card targeting the same
-  // watch so an overview + alarm + silent card in one view only refresh the data set once.
+  // Dedup key for this watch's automatic cache refresh, shared across all card types.
   _refreshKey() {
     const a = (this._stateObj() || {}).attributes || {};
-    return `${SERVICE.REFRESH_FUNCTIONS}|${a.entry_id || ""}|${a.wuid || ""}`;
+    return `${SERVICE.REFRESH_CACHE}|${a.entry_id || ""}|${a.wuid || ""}`;
   }
 
   // Explicit header-button refresh: always fires (records the dedup window so a co-rendered card's
@@ -465,7 +465,7 @@ class XploraWatchCard extends HTMLElement {
     this._autoRefreshDone = true;
     if (!refreshOnRenderEnabled(this._stateObj())) return;
     const { promise, inflight } = trackInflight(this._refreshKey(), () =>
-      this._hass.callService(DOMAIN, SERVICE.REFRESH_FUNCTIONS, this._base(), undefined, false)
+      this._hass.callService(DOMAIN, SERVICE.REFRESH_CACHE, this._base(), undefined, false)
     );
     if (!inflight) return; // suppressed within the dedup window -- nothing live to spin for
     this._setRefreshing(true);
@@ -2161,35 +2161,24 @@ class XploraWatchOverviewCard extends HTMLElement {
     ).catch((err) => console.error("xplora-watch-overview-card: refresh_functions failed", err));
   }
 
-  // When the user enabled "refresh on render", refresh this watch's data once on first show:
-  // functions (alarms/silent times) via a list sensor, and location via the watch's `update`
-  // button. Both are deduped so several cards in one view only refresh each data set once, and the
-  // shared `trackInflight` handles drive the status-row loading indicator until both settle.
+  // When enabled, ask the backend for the watch cache once. The coordinator joins a push-triggered
+  // refresh or serves fresh cached data, preventing this card from starting duplicate requests.
   _maybeRefreshOnRender(map) {
     if (this._autoRefreshDone) return;
     const primary = this._config.entity && this._hass.states[this._config.entity];
     if (!this._usable(primary)) return; // bound entity not alive yet -- retry on the next hass push
     this._autoRefreshDone = true;
     if (!refreshOnRenderEnabled(primary)) return;
-    const handles = [];
-    const listEntity = map.alarms || map.silents;
-    if (listEntity) {
-      const a = (this._hass.states[listEntity] || {}).attributes || {};
+    const refreshEntity = map.alarms || map.silents || this._config.entity;
+    if (refreshEntity) {
+      const a = (this._hass.states[refreshEntity] || {}).attributes || {};
       if (a.wuid && a.entry_id) {
-        handles.push(
-          trackInflight(`${SERVICE.REFRESH_FUNCTIONS}|${a.entry_id}|${a.wuid}`, () =>
-            this._hass.callService(DOMAIN, SERVICE.REFRESH_FUNCTIONS, { entity_id: [listEntity] }, undefined, false)
-          )
-        );
+        const key = `${SERVICE.REFRESH_CACHE}|${a.entry_id}|${a.wuid}`;
+        this._trackRefreshLoading([
+          trackInflight(key, () => this._hass.callService(DOMAIN, SERVICE.REFRESH_CACHE, { entity_id: [refreshEntity] })),
+        ]);
       }
     }
-    const updateBtn = this._buttonEntities().find((id) => roleOf(this._hass, id) === "update");
-    if (updateBtn) {
-      handles.push(
-        trackInflight(`button.press|${updateBtn}`, () => this._hass.callService("button", "press", { entity_id: updateBtn }))
-      );
-    }
-    this._trackRefreshLoading(handles);
   }
 
   // Show the "Updating…" indicator in the last-update status row while any on-render refresh is
@@ -3459,10 +3448,7 @@ class XploraWatchMapCard extends HTMLElement {
     `;
   }
 
-  // When the user enabled "refresh on render", press the watch's Update button once on first show to
-  // pull a fresh fix -- deduplicated via the shared trackInflight key `button.press|<updateBtn>` so a
-  // dashboard showing both the overview and the map card fires only ONE `see`, not two (ban hygiene,
-  // ADR 0008). Off by default. Never fires without an enabled Update button (nothing to press).
+  // When enabled, use the shared freshness-aware cache refresh rather than the manual Update button.
   _maybeRefreshOnRender() {
     if (this._autoRefreshDone) return;
     const ent = this._ent;
@@ -3473,8 +3459,12 @@ class XploraWatchMapCard extends HTMLElement {
     if (!this._usable(primary)) return; // not alive yet -- retry on the next hass push
     this._autoRefreshDone = true;
     if (!refreshOnRenderEnabled(primary)) return;
-    if (!ent.updateBtn) return;
-    trackInflight(`button.press|${ent.updateBtn}`, () => this._hass.callService("button", "press", { entity_id: ent.updateBtn }));
+    const attrs = primary.attributes || {};
+    if (!attrs.wuid || !attrs.entry_id) return;
+    const key = `${SERVICE.REFRESH_CACHE}|${attrs.entry_id}|${attrs.wuid}`;
+    trackInflight(key, () =>
+      this._hass.callService(DOMAIN, SERVICE.REFRESH_CACHE, { entity_id: anyId })
+    );
   }
 }
 

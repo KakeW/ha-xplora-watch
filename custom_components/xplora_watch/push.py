@@ -14,7 +14,7 @@ from homeassistant.helpers import aiohttp_client
 from homeassistant.helpers.storage import Store
 
 from .config import resolve
-from .const import DOMAIN
+from .const import DOMAIN, SENSOR_MESSAGE
 from .coordinator import XploraDataUpdateCoordinator
 from .push_config import FIREBASE_CONFIG
 from .pyxplora_api.gql_mutations import FCM_M
@@ -206,7 +206,18 @@ class XploraPush:
                 self.refresh_pending.discard(wuid)
                 try:
                     chats = self.prefetched_chats.pop(wuid, None)
-                    await service.async_prefetch_watch(self.coordinator, wuid, chats=chats)
+                    if chats is None:
+                        # Non-chat pushes refresh the complete watch cache, including chats and
+                        # the notification/activity feed, in one per-watch operation.
+                        await self.coordinator.async_refresh_watch_cache(wuid, force=True)
+                        cached = (self.coordinator.data or {}).get(wuid, {}).get(SENSOR_MESSAGE) or {}
+                        await service.async_prefetch_watch(self.coordinator, wuid, chats=cached)
+                    else:
+                        # Chat pushes already fetched chats + activity for sender/type verification.
+                        # Reuse that result and refresh only status/location, avoiding a duplicate
+                        # chat/feed request for the same push.
+                        await service.async_prefetch_watch(self.coordinator, wuid, chats=chats)
+                        await self.coordinator.async_refresh_watch_cache(wuid, include_chats=False, force=True)
                 except Exception as err:  # noqa: BLE001 -- optional cache fetch must not stop push delivery
                     _LOGGER.warning("Xplora message prefetch failed (%s)", type(err).__name__)
         finally:

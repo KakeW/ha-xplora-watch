@@ -35,7 +35,7 @@ const ALARMS_ENTITY = "sensor.xw_alarms_mom";
 // functions refresh off it), an `_update` button (the overview's location refresh) and a
 // `_last_update` sensor (the overview's status row). All three share one device so the overview's
 // registry-based discovery groups them. The `_alarms` sensor carries the entry_id/wuid both cards
-// build the `refresh_functions|<entry>|<wuid>` dedup key from -> the runs coalesce onto one.
+// build the `refresh_cache|<entry>|<wuid>` dedup key from -> the runs coalesce onto one.
 function makeSharedHass({ tag, callService } = {}) {
   const BTN = `button.xw_${tag}_update_mom`;
   const LU = "sensor.xw_last_update_mom";
@@ -104,7 +104,7 @@ function mountBoth() {
 const flushMicrotasks = () => vi.advanceTimersByTimeAsync(0);
 
 describe("cross-card in-sync loading (overview + alarm/silent, one watch)", () => {
-  it("both cards spin during one shared on-render refresh; the functions call fires only once", async () => {
+  it("both cards spin during one shared on-render cache refresh", async () => {
     const calls = [];
     const hass = makeSharedHass({
       tag: "xc-both",
@@ -114,9 +114,9 @@ describe("cross-card in-sync loading (overview + alarm/silent, one watch)", () =
       },
     });
     const { overview, alarm } = mountBoth();
-    // Overview receives hass first -> it FIRES the shared functions run (+ its own location press).
+    // Overview receives hass first -> it starts the shared watch-cache refresh.
     overview.hass = hass;
-    // The alarm/silent card then joins the SAME functions run deduped -- it fires no call of its own.
+    // The alarm/silent card then joins that same refresh; it fires no call of its own.
     alarm.hass = hass;
 
     // Both indicators are up synchronously -- the deduped card included.
@@ -124,10 +124,9 @@ describe("cross-card in-sync loading (overview + alarm/silent, one watch)", () =
     expect(alarmSpinning(alarm)).toBe(true);
 
     await flushMicrotasks();
-    // The functions refresh coalesced onto one run: exactly one call, fired by the overview. The
+    // The cache refresh coalesced onto one run: exactly one call, fired by the overview. The
     // deduped alarm card is spinning off the SHARED run, not a call of its own.
-    expect(calls.filter((s) => s === "refresh_functions")).toHaveLength(1);
-    expect(calls.filter((s) => s === "press")).toHaveLength(1);
+    expect(calls.filter((s) => s === "refresh_cache")).toHaveLength(1);
     // Still spinning after the microtask flush (the min-visible floor has not elapsed yet).
     expect(overviewSpinning(overview)).toBe(true);
     expect(alarmSpinning(alarm)).toBe(true);

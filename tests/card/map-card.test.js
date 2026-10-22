@@ -69,6 +69,8 @@ function makeHass({
       last_updated: stamp,
       attributes: {
         xplora_role: "tracker",
+        entry_id: `entry-${tag}`,
+        wuid: `watch-${tag}`,
         friendly_name: "Dana",
         entity_picture: "/dana.png",
         address: "Somewhere",
@@ -619,15 +621,13 @@ describe("map card — expand / fill mode", () => {
   });
 });
 
-describe("map card — refresh-on-render dedup (ban hygiene, ADR 0008)", () => {
-  it("fires ONE button.press across a co-rendered overview + map card when the opt-in is on", async () => {
+describe("map card — refresh-on-render dedup", () => {
+  it("fires ONE cache refresh across a co-rendered overview + map card when the opt-in is on", async () => {
     const ids = idsFor("dedup");
     const callService = vi.fn(async () => {});
     const hass = makeHass({ tag: "dedup", refreshOnRender: true, callService });
 
-    // The overview card presses the same Update button on render; the map card must dedup against it
-    // via the shared trackInflight key `button.press|<updateBtn>` so only ONE `see` is issued. The
-    // overview only render-refreshes when bound by an entity, so bind it to a real watch entity.
+    // Both cards use the same watch-scoped cache refresh key; the coordinator handles API freshness.
     const overview = document.createElement("xplora-watch-overview-card");
     overview.setConfig({ entity: ids.TRK });
     document.body.appendChild(overview);
@@ -639,14 +639,14 @@ describe("map card — refresh-on-render dedup (ban hygiene, ADR 0008)", () => {
     map.hass = hass;
 
     await flush();
-    const presses = callService.mock.calls.filter((c) => c[0] === "button" && c[1] === "press" && c[2].entity_id === ids.UPD);
-    expect(presses.length).toBe(1);
+    const refreshes = callService.mock.calls.filter((c) => c[0] === "xplora_watch" && c[1] === "refresh_cache");
+    expect(refreshes.length).toBe(1);
   });
 
-  it("stays static (no press) when refresh_on_card_render is off", async () => {
+  it("stays static when refresh_on_card_render is off", async () => {
     const callService = vi.fn(async () => {});
     const map = mount({ device: idsFor("static").DEV }, makeHass({ tag: "static", refreshOnRender: false, callService }));
     await flush();
-    expect(callService.mock.calls.some((c) => c[0] === "button" && c[1] === "press")).toBe(false);
+    expect(callService.mock.calls.some((c) => c[1] === "refresh_cache")).toBe(false);
   });
 });

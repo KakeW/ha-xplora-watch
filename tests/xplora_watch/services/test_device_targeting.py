@@ -83,7 +83,7 @@ async def test_entity_id_target_resolves_via_its_device(hass: HomeAssistant, coo
     with patch.object(coordinator, "async_update_xplora_data", new=AsyncMock()) as mock_update:
         await hass.services.async_call(DOMAIN, ATTR_SERVICE_SEE, {"entity_id": [entity.entity_id]}, blocking=True)
 
-    mock_update.assert_awaited_once_with([DEFAULT_WUID])
+        mock_update.assert_awaited_once_with([DEFAULT_WUID], force_functions=True, include_chats=True)
 
 
 async def test_resolve_device_recovers_wuid_against_known_wuids_not_a_naive_split(hass: HomeAssistant) -> None:

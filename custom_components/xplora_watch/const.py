@@ -35,6 +35,7 @@ API_KEY_MAPBOX: Final = "pk.eyJ1IjoieHBsb3JhdGVjaG5vbG9naWVzIiwiYSI6ImNrenpoYnFo
 
 ATTR_SERVICE_SEE: Final = "see"
 ATTR_SERVICE_REFRESH_FUNCTIONS: Final = "refresh_functions"
+ATTR_SERVICE_REFRESH_CACHE: Final = "refresh_cache"
 # Fetch + cache one past day's location track (default: yesterday). Meant to be automated daily so HA
 # keeps an archive beyond the few days the watch's API still serves. `ATTR_SERVICE_DATE` overrides
 # the day (YYYY-MM-DD).

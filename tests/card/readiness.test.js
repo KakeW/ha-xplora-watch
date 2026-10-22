@@ -82,7 +82,7 @@ describe("card readiness — auto-refresh on render", () => {
     expect(calls).toEqual([]); // still asleep on "unknown"
     el.hass = makeHass("2", { refreshOnRender: true, wuid: "w-wake", calls });
     await tick();
-    expect(calls.map((c) => c[1])).toEqual(["refresh_functions"]);
+    expect(calls.map((c) => c[1])).toEqual(["refresh_cache"]);
   });
 });
 

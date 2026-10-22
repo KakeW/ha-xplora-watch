@@ -101,28 +101,26 @@ describe("overview card — auto-refresh loading indicator", () => {
     expect(el.shadowRoot.querySelector(".upd.success")).toBeTruthy();
   });
 
-  it("keeps the spinner until the SLOWER of the functions + location refreshes settles", async () => {
-    // The location refresh (button.press) resolves well after the min-floor; the indicator must
-    // stay until BOTH settle, not clear when the faster functions refresh does.
+  it("keeps the spinner until the shared cache refresh settles", async () => {
     const calls = [];
     const el = mountOverview(
       makeOverviewHass({
         tag: "ov-both",
         callService: (domain, service, data) => {
           calls.push([domain, service, data]);
-          if (service === "press") return new Promise((r) => setTimeout(r, MIN_REFRESH_SPIN_MS * 4));
+          if (service === "refresh_cache") return new Promise((r) => setTimeout(r, MIN_REFRESH_SPIN_MS * 4));
           return Promise.resolve();
         },
       }),
     );
     expect(el.shadowRoot.querySelector(".upd.refreshing")).toBeTruthy();
-    // Past the floor: the functions refresh has settled but the location one has not -> still shown.
+    // Past the minimum spinner floor, the network refresh is still pending.
     await vi.advanceTimersByTimeAsync(MIN_REFRESH_SPIN_MS);
     expect(el.shadowRoot.querySelector(".upd.refreshing")).toBeTruthy();
-    // Once the slow location refresh settles too, the indicator clears.
+    // Once the refresh settles, the indicator clears.
     await vi.advanceTimersByTimeAsync(MIN_REFRESH_SPIN_MS * 4);
     expect(el.shadowRoot.querySelector(".upd.refreshing")).toBeNull();
-    expect(calls.map((c) => c[1]).sort()).toEqual(["press", "refresh_functions"]);
+    expect(calls.map((c) => c[1])).toEqual(["refresh_cache"]);
   });
 });
 

@@ -162,7 +162,11 @@ class XploraButton(XploraBaseEntity, ButtonEntity):
         if key == BUTTON_UPDATE:
             self._log.debug("Update (refresh) pressed for watch ...%s", self.watch_uid[25:])
             try:
-                await self.coordinator.async_update_xplora_data([self.watch_uid], include_chats=True)
+                # A user-initiated refresh must bypass both automatic freshness and the optional
+                # functions interval, and always make a new Xplora request.
+                await self.coordinator.async_update_xplora_data(
+                    [self.watch_uid], force_functions=True, include_chats=True
+                )
             except Exception as err:  # noqa: BLE001 -- record the failure for the UI, then surface it
                 self._record_update_error()
                 raise HomeAssistantError(f"Update failed: {err}") from err

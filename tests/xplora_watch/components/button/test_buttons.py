@@ -114,7 +114,9 @@ async def test_press_update_refreshes_only_this_watch(
 
     await button.async_press()
 
-    coordinator_with_data.async_update_xplora_data.assert_awaited_once_with([DEFAULT_WUID], include_chats=True)
+    coordinator_with_data.async_update_xplora_data.assert_awaited_once_with(
+        [DEFAULT_WUID], force_functions=True, include_chats=True
+    )
 
 
 async def test_press_refresh_functions_refreshes_only_this_watch(
