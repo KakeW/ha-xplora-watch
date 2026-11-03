@@ -3572,6 +3572,16 @@ const READ_DWELL_MS = 700;
 // Live Xplora evidence: the sole message counted by unreadChatMessageCount carried readFlag=2.
 // The field is not boolean; treating truthiness as "read" suppressed every receipt.
 const XPLORA_UNREAD_FLAG = 2;
+let voiceRecorderModule;
+function loadVoiceRecorder() {
+  if (!voiceRecorderModule) {
+    const url = "/xplora_watch_static/vendor/benz-amr-recorder.js";
+    voiceRecorderModule = import(/* @vite-ignore */ url)
+      .then(() => window.BenzAMRRecorder)
+      .catch((err) => { voiceRecorderModule = null; throw err; });
+  }
+  return voiceRecorderModule;
+}
 
 // Media base paths (the integration writes downloaded attachments here, keyed by msgId).
 const MEDIA = Object.freeze({
@@ -3650,6 +3660,7 @@ class XploraWatchChatCard extends HTMLElement {
   disconnectedCallback() {
     document.removeEventListener("fullscreenchange", this._onFsChange);
     window.removeEventListener("keydown", this._onLightboxKey);
+    this._clearVoice();
     if (this._readObserver) this._readObserver.disconnect();
     this._readObserver = null;
     this._readTimers.forEach((timer) => clearTimeout(timer));
@@ -3877,7 +3888,7 @@ class XploraWatchChatCard extends HTMLElement {
   }
 
   async _send(emoticonId = null) {
-    if (!this._hass || this._busy) return;
+    if (!this._hass || this._busy || this._recording || this._voiceInitializing || this._voiceBlob) return;
     const input = this._composer && this._composer.querySelector(".msg-input");
     const glyph = emoticonId && EMOJI_MAP[emoticonId];
     if (emoticonId && !glyph) return;
@@ -3917,6 +3928,102 @@ class XploraWatchChatCard extends HTMLElement {
     } catch (err) {
       this._busy = false;
       this._notify(`Xplora watch: ${err && err.message ? err.message : "could not send message"}`);
+      this._syncControls();
+    }
+  }
+
+  _clearVoice() {
+    clearTimeout(this._voiceTimer);
+    clearInterval(this._voiceClock);
+    if (this._voiceRecorder && !this._voiceInitializing && !this._voiceFinishing) this._voiceRecorder.destroy();
+    this._voiceRecorder = null;
+    this._voiceBlob = null;
+    this._recording = false;
+    if (this._voicePanel) this._voicePanel.hidden = true;
+    this._syncControls();
+  }
+
+  async _toggleRecording() {
+    if (this._recording) return this._finishRecording();
+    if (this._busy || this._voiceInitializing || this._voiceBlob) return;
+    if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+      this._notify("Mikrofoni tarvitsee suojatun HTTPS-yhteyden. Avaa HA esimerkiksi Nabu Casa -osoitteesta.");
+      return;
+    }
+    this._voiceInitializing = true;
+    this._syncControls();
+    let recorder;
+    try {
+      const Recorder = await loadVoiceRecorder();
+      if (!this.isConnected) return;
+      recorder = new Recorder();
+      this._voiceRecorder = recorder;
+      await recorder.initWithRecord();
+      if (!this.isConnected || this._voiceRecorder !== recorder) { recorder.destroy(); return; }
+      recorder.startRecord();
+      this._recording = true;
+      this._voicePanel.hidden = false;
+      const started = Date.now();
+      const label = this._voicePanel.querySelector("span");
+      label.textContent = "Äänitetään 0 / 15 s";
+      this._voiceClock = setInterval(() => { label.textContent = `Äänitetään ${Math.min(15, Math.floor((Date.now() - started) / 1000))} / 15 s`; }, 250);
+      // Leave one frame of margin for browser scheduling and resampling.
+      this._voiceTimer = setTimeout(() => this._finishRecording(), 14800);
+    } catch (err) {
+      if (recorder) recorder.destroy();
+      this._voiceRecorder = null;
+      this._notify(`Äänitystä ei voitu aloittaa: ${err?.message || "tarkista mikrofonin käyttöoikeus"}`);
+    } finally {
+      this._voiceInitializing = false;
+      this._syncControls();
+    }
+  }
+
+  async _finishRecording() {
+    if (!this._recording) return;
+    this._recording = false;
+    this._busy = true;
+    clearTimeout(this._voiceTimer);
+    clearInterval(this._voiceClock);
+    const recorder = this._voiceRecorder;
+    this._voiceFinishing = true;
+    this._syncControls();
+    try {
+      await recorder.finishRecord();
+      if (this._voiceRecorder !== recorder) return;
+      if (recorder.getDuration() < 1) throw new Error("Äänitä vähintään yksi sekunti.");
+      const blob = recorder.getBlob();
+      if (!blob || blob.size > 11200 || recorder.getDuration() > 15) throw new Error("Ääniviesti on liian pitkä. Yritä uudelleen.");
+      this._voiceBlob = blob;
+      this._voicePanel.querySelector("span").textContent = `Ääniviesti ${Math.ceil(recorder.getDuration())} s – kuuntele tai lähetä`;
+    } catch (err) {
+      this._clearVoice();
+      this._notify(err?.message || "Äänityksen käsittely epäonnistui");
+    } finally {
+      this._voiceFinishing = false;
+      if (this._voiceRecorder !== recorder) recorder.destroy();
+      this._busy = false;
+      this._syncControls();
+    }
+  }
+
+  async _sendVoice() {
+    if (!this._voiceBlob || this._busy || !this._hass) return;
+    const a = this._attrs();
+    if (!a.entry_id || !a.wuid) return;
+    this._busy = true;
+    this._syncControls();
+    try {
+      const bytes = new Uint8Array(await this._voiceBlob.arrayBuffer());
+      const audio = btoa(String.fromCharCode(...bytes));
+      await this._hass.callWS({ type: "xplora_watch/send_voice", entry_id: a.entry_id, wuid: a.wuid, audio });
+      this._clearVoice();
+      this._notify("Ääniviesti lähetetty");
+      this._refresh();
+    } catch (err) {
+      this._notify(`Ääniviestin lähetys epäonnistui: ${err?.message || "yritä uudelleen"}`);
+    } finally {
+      this._busy = false;
       this._syncControls();
     }
   }
@@ -4240,11 +4347,19 @@ class XploraWatchChatCard extends HTMLElement {
     this._card.appendChild(this._emojiPicker);
 
     // Composer (built once so typing survives background re-renders).
+    this._voicePanel = document.createElement("div");
+    this._voicePanel.className = "voice-panel";
+    this._voicePanel.hidden = true;
+    this._voicePanel.innerHTML = '<span></span> <button type="button" class="voice-preview">▶ Kuuntele</button> <button type="button" class="voice-cancel">Peruuta</button>';
+    this._voicePanel.querySelector(".voice-preview").addEventListener("click", () => this._voiceRecorder?.play());
+    this._voicePanel.querySelector(".voice-cancel").addEventListener("click", () => this._clearVoice());
+    this._card.appendChild(this._voicePanel);
     this._composer = document.createElement("div");
     this._composer.className = "composer";
     this._composer.innerHTML = `
       <ha-icon-button class="emoji-btn" label="Xplora emojis"><ha-icon icon="mdi:emoticon-outline"></ha-icon></ha-icon-button>
       <textarea class="msg-input" rows="1" placeholder="Type a message…" autocomplete="off"></textarea>
+      <ha-icon-button class="mic-btn" label="Äänitä viesti"><ha-icon icon="mdi:microphone"></ha-icon></ha-icon-button>
       <ha-icon-button class="send-btn" label="Send"><ha-icon icon="mdi:send"></ha-icon></ha-icon-button>`;
     const input = this._composer.querySelector(".msg-input");
     this._composer.querySelector(".emoji-btn").addEventListener("click", () => {
@@ -4262,7 +4377,8 @@ class XploraWatchChatCard extends HTMLElement {
       input.style.height = Math.min(input.scrollHeight, 120) + "px";
       this._syncControls();
     });
-    this._composer.querySelector(".send-btn").addEventListener("click", () => this._send());
+    this._composer.querySelector(".mic-btn").addEventListener("click", () => this._toggleRecording());
+    this._composer.querySelector(".send-btn").addEventListener("click", () => this._voiceBlob ? this._sendVoice() : this._send());
     this._card.appendChild(this._composer);
 
     this._built = true;
@@ -4361,9 +4477,17 @@ class XploraWatchChatCard extends HTMLElement {
     if (this._composer) {
       const input = this._composer.querySelector(".msg-input");
       const send = this._composer.querySelector(".send-btn");
-      if (send) send.disabled = this._busy || !input || !input.value.trim();
-      this._composer.querySelector(".emoji-btn").disabled = this._busy;
-      this._emojiPicker.querySelectorAll("button").forEach((button) => { button.disabled = this._busy; });
+      if (send) send.disabled = this._busy || this._recording || this._voiceInitializing || (!this._voiceBlob && (!input || !input.value.trim()));
+      const voiceActive = this._recording || this._voiceInitializing || !!this._voiceBlob;
+      if (input) input.disabled = this._busy || voiceActive;
+      const mic = this._composer.querySelector(".mic-btn");
+      mic.disabled = this._busy || this._voiceInitializing || !!this._voiceBlob;
+      mic.setAttribute("label", this._recording ? "Lopeta äänitys" : "Äänitä viesti");
+      mic.querySelector("ha-icon").setAttribute("icon", this._recording ? "mdi:stop-circle" : "mdi:microphone");
+      this._voicePanel.querySelector(".voice-preview").disabled = this._busy || !this._voiceBlob;
+      this._voicePanel.querySelector(".voice-cancel").disabled = this._busy;
+      this._composer.querySelector(".emoji-btn").disabled = this._busy || voiceActive;
+      this._emojiPicker.querySelectorAll("button").forEach((button) => { button.disabled = this._busy || voiceActive; });
     }
   }
 
@@ -4656,8 +4780,12 @@ class XploraWatchChatCard extends HTMLElement {
       .emoji-picker button { min-height: 44px; font-size: 1.6rem; border: 0; border-radius: 8px; background: var(--secondary-background-color); cursor: pointer; }
       .emoji-btn { color: var(--primary-color); flex: 0 0 auto; }
       .composer { display: flex; align-items: flex-end; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--divider-color); flex: 0 0 auto; }
+      .voice-panel { padding: 12px 16px; border-top: 1px solid var(--divider-color); flex: 0 0 auto; }
+      .voice-panel span { display: block; margin-bottom: 8px; font-size: 0.9rem; }
+      .voice-panel button { min-height: 44px; padding: 6px 12px; margin-right: 8px; font: inherit; color: var(--primary-text-color); background: var(--secondary-background-color); border: 1px solid var(--divider-color); border-radius: 12px; cursor: pointer; }
+      .mic-btn { color: var(--primary-color); flex: 0 0 auto; }
       .msg-input {
-        flex: 1; resize: none; font: inherit; font-size: 0.95rem; line-height: 1.35;
+        flex: 1; min-width: 0; resize: none; font: inherit; font-size: 0.95rem; line-height: 1.35;
         color: var(--primary-text-color); background: var(--secondary-background-color);
         border: 1px solid var(--divider-color); border-radius: 18px;
         padding: 10px 14px; min-height: 22px; max-height: 120px; box-sizing: border-box;

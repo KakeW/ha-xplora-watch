@@ -40,15 +40,15 @@ actions:
               {{ trigger.event.data.get('text') or
                  ('Uusi ääniviesti' if trigger.event.data.get('message_type') == 'chat_voice'
                   else 'Uusi viesti kellosta') }}
-            data:
-              tag: "xplora_{{ trigger.event.data.device_id }}_{{ trigger.event.data.message_id }}"
-              actions:
-                - action: "XPLORA_REPLY_{{ phone }}:{{ trigger.event.data.device_id }}"
-                  title: Vastaa
-                  behavior: textInput
-                  activationMode: background
-                  textInputButtonTitle: Lähetä
-                  textInputPlaceholder: Kirjoita vastaus…
+            data: >-
+              {% set common = dict(
+                tag='xplora_' ~ trigger.event.data.device_id ~ '_' ~ trigger.event.data.message_id,
+                actions=[dict(
+                  action='XPLORA_REPLY_' ~ phone ~ ':' ~ trigger.event.data.device_id,
+                  title='Vastaa', behavior='textInput', activationMode='background',
+                  textInputButtonTitle='Lähetä', textInputPlaceholder='Kirjoita vastaus…')]) %}
+              {{ dict(common, audio=trigger.event.data.audio_url, attachment=dict(lazy=true))
+                 if trigger.event.data.get('audio_url') else common }}
       - conditions: >-
           {{ trigger.id == 'reply'
              and trigger.event.data.get('action', '').startswith('XPLORA_REPLY_' ~ phone ~ ':')

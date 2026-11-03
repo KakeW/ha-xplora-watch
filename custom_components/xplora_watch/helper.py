@@ -99,7 +99,12 @@ async def async_register_frontend_card(hass: HomeAssistant) -> None:
         except Exception:  # noqa: BLE001 -- the version is only a cache hint; fall back if unavailable
             version = "0"
         versioned_url = f"{FRONTEND_SCRIPT_URL}?v={version}"
-        await hass.http.async_register_static_paths([StaticPathConfig(FRONTEND_SCRIPT_URL, card_path, False)])
+        await hass.http.async_register_static_paths(
+            [
+                StaticPathConfig(FRONTEND_SCRIPT_URL, card_path, False),
+                StaticPathConfig("/xplora_watch_static/vendor", os.path.join(os.path.dirname(card_path), "vendor"), True),
+            ]
+        )
         # `add_extra_js_url` injects the bundle as a deferred ES module. It is NOT awaited before
         # Lovelace renders, so on a cold load the dashboard can build its cards before the module's
         # `customElements.define(...)` runs -> "Custom element doesn't exist" error cards that only a
@@ -281,9 +286,19 @@ async def encoded_base64_string_to_mp3_file(hass: HomeAssistant, base64_string: 
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.PIPE,
         )
-        _, stderr = await proc.communicate()
+        try:
+            _, stderr = await proc.communicate()
+        except asyncio.CancelledError:
+            if proc.returncode is None:
+                proc.kill()
+            await proc.wait()
+            if os.path.exists(mp3_path):
+                await hass.async_add_executor_job(os.remove, mp3_path)
+            raise
         if proc.returncode != 0:
             _LOGGER.error("ffmpeg failed converting %s (exit %s): %s", amr_path, proc.returncode, stderr.decode("utf-8", "replace"))
+            if os.path.exists(mp3_path):
+                await hass.async_add_executor_job(os.remove, mp3_path)
     finally:
         if os.path.exists(amr_path):
             await hass.async_add_executor_job(os.remove, amr_path)

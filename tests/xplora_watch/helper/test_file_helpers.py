@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
 import os
@@ -62,6 +63,31 @@ def _fake_ffmpeg_process(returncode: int = 0) -> MagicMock:
     proc.communicate = AsyncMock(return_value=(b"", b""))
     proc.returncode = returncode
     return proc
+
+
+async def test_cancelled_voice_conversion_kills_process_and_discards_partial_audio(hass):
+    media_path = hass.config.path("www/voice")
+    os.makedirs(media_path, exist_ok=True)
+    proc = _fake_ffmpeg_process()
+    proc.returncode = None
+    proc.wait = AsyncMock()
+
+    async def interrupted():
+        with open(f"{media_path}/cancelled.mp3", "wb") as output:
+            output.write(b"partial")
+        raise asyncio.CancelledError
+
+    proc.communicate.side_effect = interrupted
+    with (
+        patch("custom_components.xplora_watch.helper.get_ffmpeg_manager"),
+        patch("custom_components.xplora_watch.helper.asyncio.create_subprocess_exec", new=AsyncMock(return_value=proc)),
+        pytest.raises(asyncio.CancelledError),
+    ):
+        await encoded_base64_string_to_mp3_file(hass, base64.b64encode(b"AMR").decode(), "cancelled")
+    proc.kill.assert_called_once()
+    proc.wait.assert_awaited_once()
+    assert not os.path.exists(f"{media_path}/cancelled.mp3")
+    assert not os.path.exists(f"{media_path}/cancelled.amr")
 
 
 async def test_encoded_base64_string_to_mp3_file_converts_and_cleans_up_amr(hass: HomeAssistant) -> None:

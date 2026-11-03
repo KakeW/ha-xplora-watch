@@ -38,6 +38,30 @@ async def test_incoming_prefetches_without_waiting_for_card(hass, coordinator, p
     await receiver.stop()
 
 
+@pytest.mark.parametrize("available", [True, False])
+async def test_voice_notification_attaches_only_a_cached_file(hass, coordinator, available):
+    coordinator.message_data.side_effect = None
+    coordinator.message_data.return_value = {"list": [{"msgId": "123", "sender": {"id": "watch-test"}, "type": "VOICE", "data": {}}]}
+    receiver = XploraPush(hass, coordinator, "test")
+    events = []
+    hass.bus.async_listen(EVENT_MESSAGE, lambda event: events.append(event.data))
+    with (
+        patch(
+            "custom_components.xplora_watch.services.XploraMessageSensorUpdateService._fetch_chat_voice", new_callable=AsyncMock
+        ) as fetch,
+        patch("custom_components.xplora_watch.helper.chat_media_cached", return_value=available),
+    ):
+        if not available:
+            fetch.side_effect = TimeoutError
+        await receiver.consume(parse_message(payload()))
+        await hass.async_block_till_done()
+    assert len(events) == 1
+    assert events[0]["message_type"] == "chat_voice"
+    assert events[0].get("audio_url") == ("/local/voice/123.mp3" if available else None)
+    fetch.assert_awaited_once_with(coordinator, "watch-test", "123")
+    await receiver.stop()
+
+
 async def test_non_chat_push_emits_activity_and_prefetches_all_watch_caches(hass, coordinator, prefetch):
     receiver = XploraPush(hass, coordinator, "test")
     events = []

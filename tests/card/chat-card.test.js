@@ -7,6 +7,34 @@ beforeAll(async () => {
 });
 
 describe("setConfig", () => {
+  it("sends a recorded voice draft to the bound watch and clears it only after acceptance", async () => {
+    const el = mountChat([]);
+    el._hass.callWS = vi.fn().mockRejectedValueOnce(new Error("Rejected")).mockResolvedValueOnce({ message_id: "voice1" });
+    const recorder = { destroy: vi.fn() };
+    const draft = { arrayBuffer: async () => new Uint8Array([35, 33, 65, 77, 82, 10]).buffer };
+    el._voiceRecorder = recorder;
+    el._voiceBlob = draft;
+    await el._sendVoice();
+    expect(el._voiceBlob).toBe(draft);
+    expect(recorder.destroy).not.toHaveBeenCalled();
+    await el._sendVoice();
+    expect(el._hass.callWS).toHaveBeenLastCalledWith({ type: "xplora_watch/send_voice", entry_id: "entry1", wuid: "watch1", audio: "IyFBTVIK" });
+    expect(el._voiceBlob).toBe(null);
+    expect(recorder.destroy).toHaveBeenCalledOnce();
+    el.remove();
+  });
+
+  it("stops recording and releases the microphone when the chat closes", () => {
+    const el = mountChat([]);
+    const recorder = { destroy: vi.fn() };
+    el._voiceRecorder = recorder;
+    el._recording = true;
+    el._voiceTimer = setTimeout(() => { throw new Error("Recording timer was not cleared"); }, 1000);
+    el.remove();
+    expect(recorder.destroy).toHaveBeenCalledOnce();
+    expect(el._recording).toBe(false);
+  });
+
   it("recovers when an old media URL fails after readiness was published", async () => {
     const messages = [chat("late", { type: "VOICE" })];
     const el = mountChat(messages);

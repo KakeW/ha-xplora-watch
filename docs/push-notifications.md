@@ -21,7 +21,11 @@ an outgoing echo cannot be suppressed through thread verification in that case.
 The user confirmed both text and voice notifications through HA to their iPhone
 on 2026-09-14. The official iOS bundle also names `chat_emoticon`, `chat_image`
 and `chat_video`; these still need live verification. Media is cached for the chat
-card but is not attached to notifications.
+card. Verified voice events additionally carry `audio_url` when the MP3 is ready.
+Only that voice file is prepared before the event, with an eight-second budget;
+failure still delivers the alert without an attachment. Text alerts do not wait
+for media. The quick-reply blueprint attaches ready audio using Companion's
+`audio` and lazy-attachment options.
 
 Create an automation in YAML and replace the notification action with your phone's
 actual action from Developer Tools > Actions:
@@ -61,8 +65,35 @@ The reply is sent through `xplora_watch.send_message` to the same HA watch devic
 that produced the verified notification. The blueprint handles both notifications
 and replies without holding a waiting automation open. Empty replies and devices
 not selected in the blueprint are ignored. Each phone should use its own blueprint
-automation. A real iPhone/Apple Watch test is still needed to confirm the displayed
-input UI and end-to-end sending on the user's devices.
+automation. Re-import the blueprint after upgrading to receive attachment changes;
+HACS does not replace previously imported blueprint files.
+
+Companion's documented text-input action still requires tapping **Vastaa** after
+expanding the notification. This integration cannot supply its own native iOS
+notification view or a voice-recording action. Keyboard dictation, if available,
+produces a text reply rather than an audio recording.
+
+Ready voice attachments can be listened to in an expanded iPhone notification;
+the exact controls and Apple Watch behavior need testing on the user's devices.
+The file uses the same `/local/voice/` cache as the chat, reachable through the
+Companion server URL. These existing `www` files do not require HA authentication.
+See [Standard attachments](https://companion.home-assistant.io/docs/notifications/notification-attachments/).
+
+## Recording a voice reply in the chat
+
+Tap the microphone, record for 1–15 seconds and tap stop (or let it stop at the
+limit). Preview with **Kuuntele**, discard with **Peruuta**, or send with the send
+button. Nothing is sent automatically. Closing the chat stops the microphone.
+Microphone permission and HTTPS are required on a phone; use the Nabu Casa URL
+if the local HA URL is plain HTTP.
+
+The locally bundled encoder creates AMR-NB at 4.75 kbit/s in a browser worker;
+no external encoding service or server-side AMR encoder is used. HA validates
+the frame count and 11.2 KB limit through its authenticated websocket, then calls
+`sendChatMsg(type: VOICE, format: "amr", body: base64, duration: seconds)`.
+This API shape comes from the installed Xplora iOS bundle's `SendChatMsg.graphql`
+and `schema.graphqls`. A returned message ID confirms server acceptance; actual
+playback on the watch still requires a device test.
 
 This uses Companion's documented `behavior: textInput`, `activationMode: background`
 and `mobile_app_notification_action.reply_text` fields:

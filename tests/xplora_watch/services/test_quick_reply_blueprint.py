@@ -65,7 +65,8 @@ async def test_unselected_watch_or_empty_reply_does_not_send(hass, action, text)
     assert calls == []
 
 
-async def test_incoming_notification_contains_background_text_action(hass):
+@pytest.mark.parametrize("audio_url", [None, "/local/voice/123.mp3"])
+async def test_incoming_notification_contains_background_text_action(hass, audio_url):
     config = blueprint_config()
     calls = []
 
@@ -90,6 +91,7 @@ async def test_incoming_notification_contains_background_text_action(hass):
                             "message_id": "123",
                             "sender_name": "Lilian",
                             "text": "Moi!",
+                            **({"audio_url": audio_url} if audio_url else {}),
                         }
                     },
                 },
@@ -100,3 +102,8 @@ async def test_incoming_notification_contains_background_text_action(hass):
     assert action["action"] == "XPLORA_REPLY_phone-device:lilian"
     assert action["behavior"] == "textInput"
     assert action["activationMode"] == "background"
+    if audio_url:
+        assert calls[0]["data"]["audio"] == audio_url
+        assert calls[0]["data"]["attachment"]["lazy"] is True
+    else:
+        assert "audio" not in calls[0]["data"]

@@ -196,6 +196,7 @@ class XploraPush:
         if sender not in watches:
             _LOGGER.debug("Push sender has no direct watch UID match; refreshing %d configured watch(es)", len(targets))
         matched = None
+        refreshed = []
         options = resolve(self.coordinator._entry.options)
         for wuid in targets:
             try:
@@ -212,9 +213,7 @@ class XploraPush:
                         matched = (wuid, chat)
             except Exception as err:  # noqa: BLE001 -- fetch failure must not stop push delivery
                 _LOGGER.warning("Push chat verification failed (%s)", type(err).__name__)
-            self.refresh_pending.add(wuid)
-            if wuid not in self.refresh_tasks:
-                self.refresh_tasks[wuid] = self.hass.async_create_background_task(self.refresh_messages(wuid), f"Xplora messages {wuid}")
+            refreshed.append(wuid)
             if matched:
                 break
         if matched:
@@ -236,16 +235,32 @@ class XploraPush:
                 }.get(chat.get("type"), "chat_unknown"),
                 "text": str(data.get("text") or data.get("emoticon_id") or ""),
             }
-            device = dr.async_get(self.hass).async_get_device(
-                identifiers={(DOMAIN, f"{self.coordinator._entry.unique_id}_{wuid}")}
-            )
+            device = dr.async_get(self.hass).async_get_device(identifiers={(DOMAIN, f"{self.coordinator._entry.unique_id}_{wuid}")})
             if device is not None:
                 message["device_id"] = device.id
+            if chat.get("type") == "VOICE":
+                # Prepare only this attachment, not the whole thread/status refresh.
+                # Text notifications continue to fire without waiting for media.
+                from .helper import chat_media_cached
+                from .services import XploraMessageSensorUpdateService
+
+                msg_id = message["message_id"]
+                try:
+                    async with asyncio.timeout(8):
+                        await XploraMessageSensorUpdateService(self.hass, self.entry_id)._fetch_chat_voice(self.coordinator, wuid, msg_id)
+                except Exception as err:  # noqa: BLE001 -- an attachment must never suppress the alert
+                    _LOGGER.debug("Voice notification attachment unavailable (%s)", type(err).__name__)
+                if chat_media_cached(self.hass, msg_id, "mp3", "voice"):
+                    message["audio_url"] = f"/local/voice/{msg_id}.mp3"
         else:
             # Unverified push labels can misdescribe emoji as voice. Deliver a
             # generic alert rather than claiming a type we could not verify.
             message = {**message, "message_type": "chat_unknown", "text": ""}
         self.hass.bus.async_fire(EVENT_MESSAGE, {"entry_id": self.entry_id, **message})
+        for wuid in refreshed:
+            self.refresh_pending.add(wuid)
+            if wuid not in self.refresh_tasks:
+                self.refresh_tasks[wuid] = self.hass.async_create_background_task(self.refresh_messages(wuid), f"Xplora messages {wuid}")
 
     async def consume_activity(self, activity: dict[str, str]) -> None:
         """Notify HA of a non-chat push and warm every watch's local event/message cache."""

@@ -19,12 +19,37 @@ from .const import DOMAIN, WS_TYPE_LOCATION_HISTORY
 from .coordinator import XploraDataUpdateCoordinator
 from .pyxplora_api.exception_classes import AuthError, RateLimitError
 from .pyxplora_api.exception_classes import ConnectionError as XploraConnectionError
+from .voice import async_send_voice
 
 
 @callback
 def async_register_websocket_commands(hass: HomeAssistant) -> None:
     """Register the integration's websocket commands (idempotent; keyed by command type)."""
     websocket_api.async_register_command(hass, websocket_location_history)
+    websocket_api.async_register_command(hass, websocket_send_voice)
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "xplora_watch/send_voice",
+        vol.Required("entry_id"): str,
+        vol.Required("wuid"): str,
+        vol.Required("audio"): vol.All(str, vol.Length(max=14936)),
+    }
+)
+@websocket_api.async_response
+async def websocket_send_voice(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    """Accept one small recording through HA's authenticated websocket."""
+    coordinator = hass.data.get(DOMAIN, {}).get(msg["entry_id"])
+    if not isinstance(coordinator, XploraDataUpdateCoordinator):
+        connection.send_error(msg["id"], websocket_api.const.ERR_NOT_FOUND, "unknown or unloaded entry_id")
+        return
+    try:
+        message_id = await async_send_voice(coordinator, msg["wuid"], msg["audio"])
+    except Exception as err:  # noqa: BLE001 -- return a clean, content-free upload error
+        connection.send_error(msg["id"], "voice_send_failed", str(err))
+        return
+    connection.send_result(msg["id"], {"message_id": message_id})
 
 
 @websocket_api.websocket_command(
