@@ -33,6 +33,19 @@ _LOGGER = logging.getLogger(__name__)
 class XploraFcmPushClient(FcmPushClient):
     """Accept unpadded base64url headers and isolate malformed encrypted messages."""
 
+    def _app_data_by_key(self, msg, key, do_not_raise=False):
+        value = super()._app_data_by_key(msg, key, do_not_raise=do_not_raise)
+        parameter = {"crypto-key": "dh", "encryption": "salt"}.get(key)
+        if parameter and value:
+            # The upstream client blindly slices off 'dh=' / 'salt='. Extract the
+            # named parameter first: headers may also contain p256ecdsa, keyid or rs.
+            for part in value.replace(",", ";").split(";"):
+                name, separator, item = part.partition("=")
+                if separator and name.strip().lower() == parameter:
+                    return parameter + "=" + item.strip().strip('"')
+            raise ValueError("Required encryption header parameter is missing")
+        return value
+
     @staticmethod
     def _decrypt_raw_data(credentials, crypto_key_str, salt_str, raw_data):
         stage = "peer_key_base64"
