@@ -50,10 +50,9 @@ from .const import (
     ATTR_SERVICE_NAME,
     ATTR_SERVICE_READ_MSG,
     ATTR_SERVICE_REBOOT,
-    ATTR_SERVICE_REFRESH_FUNCTIONS,
     ATTR_SERVICE_REFRESH_CACHE,
+    ATTR_SERVICE_REFRESH_FUNCTIONS,
     ATTR_SERVICE_SEE,
-    SENSOR_MESSAGE,
     ATTR_SERVICE_SEND_MSG,
     ATTR_SERVICE_SET_ALARM_ENABLED,
     ATTR_SERVICE_SET_SILENT_ENABLED,
@@ -69,6 +68,7 @@ from .const import (
     ATTR_SERVICE_WEEKDAYS,
     ATTR_SILENT,
     DOMAIN,
+    SENSOR_MESSAGE,
 )
 from .coordinator import XploraDataUpdateCoordinator
 from .helper import (
@@ -81,10 +81,10 @@ from .helper import (
 from .log import Log
 from .pyxplora_api.exception_classes import AuthError, RateLimitError
 from .pyxplora_api.exception_classes import ConnectionError as XploraConnectionError
-
-_LOGGER = logging.getLogger(__name__)
 from .pyxplora_api.pyxplora_api_async import FetchError
 from .pyxplora_api.status import ChatEmoticonType, NormalStatus
+
+_LOGGER = logging.getLogger(__name__)
 
 # Per-account gating action phrases, shared by every Guardian-only control service. They fill the
 # `not_guardian` error's `{action}` placeholder and the per-watch "skipped: contact" warning.
@@ -500,6 +500,7 @@ async def async_setup_services(hass: HomeAssistant, entry_id: str) -> None:
     see_service = XploraSeeService(hass, entry_id)
     refresh_functions_service = XploraRefreshFunctionsService(hass, entry_id)
     refresh_cache_service = XploraRefreshCacheService(hass, entry_id)
+    live_service = XploraLiveTrackingService(hass, entry_id)
     fetch_history_service = XploraFetchHistoryService(hass, entry_id)
     alarm_service = XploraAlarmService(hass, entry_id)
     silent_service = XploraSilentService(hass, entry_id)
@@ -512,6 +513,9 @@ async def async_setup_services(hass: HomeAssistant, entry_id: str) -> None:
 
     async def async_refresh_cache(service: ServiceCall) -> None:
         await refresh_cache_service.async_refresh_cache(kwargs=dict(service.data))
+
+    async def async_live_tracking(service: ServiceCall) -> None:
+        await live_service.async_live_tracking(service.service, dict(service.data))
 
     async def async_fetch_history(service: ServiceCall) -> None:
         await fetch_history_service.async_fetch_history(kwargs=dict(service.data))
@@ -592,6 +596,11 @@ async def async_setup_services(hass: HomeAssistant, entry_id: str) -> None:
     hass.services.async_register(
         DOMAIN, ATTR_SERVICE_REFRESH_CACHE, async_refresh_cache, schema=BASE_REFRESH_CACHE_SERVICE_SCHEMA
     )
+    hass.services.async_register(
+        DOMAIN, "start_live_tracking", async_live_tracking,
+        schema=_target_schema({vol.Optional("duration_minutes", default=5): vol.All(vol.Coerce(int), vol.Range(min=1, max=30))}),
+    )
+    hass.services.async_register(DOMAIN, "stop_live_tracking", async_live_tracking, schema=_target_schema())
     hass.services.async_register(DOMAIN, ATTR_SERVICE_FETCH_HISTORY, async_fetch_history, schema=BASE_FETCH_HISTORY_SERVICE_SCHEMA)
     hass.services.async_register(DOMAIN, ATTR_SERVICE_CREATE_ALARM, async_create_alarm, schema=BASE_CREATE_ALARM_SERVICE_SCHEMA)
     hass.services.async_register(DOMAIN, ATTR_SERVICE_UPDATE_ALARM, async_update_alarm, schema=BASE_UPDATE_ALARM_SERVICE_SCHEMA)
@@ -631,6 +640,8 @@ def async_unload_services(hass: HomeAssistant) -> None:
     hass.services.async_remove(DOMAIN, ATTR_SERVICE_SEE)
     hass.services.async_remove(DOMAIN, ATTR_SERVICE_REFRESH_FUNCTIONS)
     hass.services.async_remove(DOMAIN, ATTR_SERVICE_REFRESH_CACHE)
+    hass.services.async_remove(DOMAIN, "start_live_tracking")
+    hass.services.async_remove(DOMAIN, "stop_live_tracking")
     hass.services.async_remove(DOMAIN, ATTR_SERVICE_CREATE_ALARM)
     hass.services.async_remove(DOMAIN, ATTR_SERVICE_UPDATE_ALARM)
     hass.services.async_remove(DOMAIN, ATTR_SERVICE_DELETE_ALARM)
@@ -814,6 +825,20 @@ class XploraRefreshFunctionsService(XploraService):
             await account.call("Refresh functions", None, lambda: coordinator.async_refresh_functions(account.wuids), recover=False)
 
         await self._fan_out(data, ATTR_SERVICE_REFRESH_FUNCTIONS, body)
+
+
+class XploraLiveTrackingService(XploraService):
+    """Account-safe dispatch for live tracking sessions."""
+
+    async def async_live_tracking(self, action: str, data: dict[str, Any]) -> None:
+        async def body(account: _Account) -> None:
+            for wuid in account.targets(guardian=True, action=action):
+                if action == "start_live_tracking":
+                    await account.call(action, wuid, lambda wid=wuid: account.coordinator.live.start(wid, data.get("duration_minutes", 5)), recover=False)
+                else:
+                    await account.call(action, wuid, lambda wid=wuid: account.coordinator.live.stop(wid), recover=False)
+
+        await self._fan_out(data, action, body)
 
 
 class XploraRefreshCacheService(XploraService):

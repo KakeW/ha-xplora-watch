@@ -222,6 +222,32 @@ refresh_cache:
       required: true
       selector: *id001
   name: Refresh watch cache
+start_live_tracking:
+  name: Start live location tracking
+  description: Ask the primary guardian's watch to report locations more frequently. Home Assistant reads the latest location every 15 seconds and stops automatically after the selected duration.
+  fields:
+    device_id:
+      name: Watch(es)
+      description: The Xplora® watch(es) this action applies to.
+      required: true
+      selector: *id001
+    duration_minutes:
+      name: Duration (minutes)
+      default: 5
+      selector:
+        number:
+          min: 1
+          max: 30
+          mode: box
+stop_live_tracking:
+  name: Stop live location tracking
+  description: Stop the live-location session for the selected watch(es).
+  fields:
+    device_id:
+      name: Watch(es)
+      description: The Xplora® watch(es) this action applies to.
+      required: true
+      selector: *id001
 see:
   description: 'Manually refresh the watch''s live status: location, battery, charging, online status
     and steps (the data from the watch''s device list). Other data has its own services and is not refreshed

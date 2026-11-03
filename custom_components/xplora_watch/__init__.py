@@ -111,6 +111,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
+    async def stop_live_tracking(_event: Event) -> None:
+        await coordinator.live.shutdown()
+
+    entry.async_on_unload(hass.bus.async_listen_once("homeassistant_stop", stop_live_tracking))
+
     if entry.options.get("push_notifications", False) and not is_demo_account(entry.data.get(CONF_EMAIL)):
         from .push import XploraPush
 
@@ -140,6 +145,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     async_unload_services(hass)
     if unload_ok:
         coordinator = hass.data[DOMAIN][entry.entry_id]
+        await coordinator.live.shutdown()
         if coordinator.push is not None:
             await coordinator.push.stop()
         hass.data[DOMAIN].pop(entry.entry_id)

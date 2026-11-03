@@ -235,6 +235,9 @@ class XploraDeviceTracker(XploraBaseEntity, TrackerEntity):
             data,
             **{
                 ATTR_SERVICE_USER: self.coordinator.username,
+                "entry_id": self._config_entry.entry_id,
+                "wuid": self.watch_uid,
+                **self.coordinator.live.attributes(self.watch_uid),
                 ATTR_TRACKER_DISTOHOME: distance_to_home,
                 ATTR_TRACKER_ADDR: (self.coordinator.data[self.watch_uid].get(ATTR_LOCATION_NAME, None) if distance_to_home else None),
                 # Ungated from distance-to-home (ADR 0007): the fix time is the age of the shown

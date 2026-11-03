@@ -3224,6 +3224,28 @@ class XploraWatchMapCard extends HTMLElement {
       </select></label>` : "";
     this._card.innerHTML = `${this._headerHtml(trk)}${bannerHtml}${shareFormatHtml}<div class="map-share-feedback" role="status"${this._shareFeedback && coords ? "" : " hidden"}>${this._esc(this._shareFeedback)} <a data-share-fallback target="_blank" rel="noopener noreferrer">${this._shareText("Avaa Apple Kartoissa", "Open in Apple Maps")}</a></div><div class="map-body"></div>`;
 
+    const liveAttrs = (trk && trk.attributes) || {};
+    if (liveAttrs.live_tracking_allowed || liveAttrs.live_tracking_active || liveAttrs.live_tracking_stop_pending) {
+      const active = liveAttrs.live_tracking_active || liveAttrs.live_tracking_stop_pending;
+      const label = active ? this._shareText("Lopeta live-seuranta", "Stop live tracking") : this._shareText("Aloita live-seuranta", "Start live tracking");
+      const until = liveAttrs.live_tracking_until ? new Date(liveAttrs.live_tracking_until).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
+      const error = this._liveError || liveAttrs.live_tracking_error || "";
+      this._card.querySelector(".map-body").insertAdjacentHTML("beforebegin", `
+        <div class="map-live-controls">
+          <button type="button" data-live${this._liveBusy ? " disabled" : ""} aria-pressed="${!!active}">
+            <ha-icon icon="${active ? "mdi:stop-circle-outline" : "mdi:crosshairs-gps"}"></ha-icon>${label}
+          </button>
+          ${active ? `<span>${liveAttrs.live_tracking_stop_pending ? this._shareText("Lopetus vahvistamatta", "Stop unconfirmed") : `${this._shareText("Päättyy", "Ends")} ${this._esc(until)}`}</span>` : `<select data-live-duration aria-label="${this._shareText("Seurannan kesto", "Tracking duration")}"${this._liveBusy ? " disabled" : ""}>
+            ${[5, 15, 30].map((minutes) => `<option value="${minutes}"${(this._liveMinutes || 5) === minutes ? " selected" : ""}>${minutes} min</option>`).join("")}
+          </select>`}
+          ${liveAttrs.live_tracking_active && !liveAttrs.live_tracking_received ? `<span>${this._shareText("Odotetaan uutta sijaintia…", "Waiting for a new location…")}</span>` : ""}
+          ${error ? `<span role="alert">${this._esc(error)}</span>` : ""}
+        </div>`);
+      this._card.querySelector("[data-live]").addEventListener("click", () => this._toggleLive());
+      const duration = this._card.querySelector("[data-live-duration]");
+      if (duration) duration.addEventListener("change", () => { this._liveMinutes = Number(duration.value); });
+    }
+
     const shareEl = this._card.querySelector("[data-share]");
     if (shareEl) shareEl.addEventListener("click", () => this._shareLocation());
     const formatEl = this._card.querySelector("[data-share-format]");
@@ -3359,6 +3381,26 @@ class XploraWatchMapCard extends HTMLElement {
   // Reload = force a fresh fix by pressing the watch's Update button (the integration's `see`), then
   // await the poll outcome and re-derive the banner in place. The banner also re-derives on the next
   // hass push, but recompute now so the spinner clears against fresh data (ADR 0008).
+  async _toggleLive() {
+    if (this._liveBusy || !this._ent.tracker) return;
+    const tracker = this._hass.states[this._ent.tracker];
+    const attrs = (tracker && tracker.attributes) || {};
+    const stopping = attrs.live_tracking_active || attrs.live_tracking_stop_pending;
+    this._liveBusy = true;
+    this._liveError = "";
+    this._render();
+    try {
+      const data = { entity_id: [this._ent.tracker] };
+      if (!stopping) data.duration_minutes = this._liveMinutes || 5;
+      await this._hass.callService(DOMAIN, stopping ? "stop_live_tracking" : "start_live_tracking", data);
+    } catch (error) {
+      this._liveError = error.message || String(error);
+    } finally {
+      this._liveBusy = false;
+      this._render();
+    }
+  }
+
   async _reload() {
     const ent = this._ent;
     // `_reloading` guards re-entrancy (a second tap, or a click on a button a mid-flight re-render
@@ -3428,6 +3470,14 @@ class XploraWatchMapCard extends HTMLElement {
       .map-banner-text { flex: 1 1 auto; min-width: 0; white-space: normal; overflow-wrap: anywhere; color: var(--primary-text-color); }
       /* Fixed 48px tap targets that never shrink, so a long banner can't clip or hide them. */
       .map-reload, .map-expand, .map-share { flex: 0 0 auto; min-width: 48px; min-height: 48px; color: var(--secondary-text-color); }
+      .map-live-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 8px 14px;
+        flex: 0 0 auto; border-bottom: 1px solid var(--divider-color); }
+      .map-live-controls button, .map-live-controls select { min-height: 44px; font: inherit;
+        color: var(--primary-text-color); background: var(--card-background-color, white);
+        border: 1px solid var(--divider-color); border-radius: 8px; padding: 6px 10px; }
+      .map-live-controls button { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+      .map-live-controls button[aria-pressed="true"] { color: var(--primary-color); }
+      .map-live-controls [role="alert"] { flex-basis: 100%; color: var(--error-color, #db4437); }
       .map-share-feedback { padding: 8px 14px; color: var(--primary-text-color); }
       .map-share-feedback[hidden] { display: none; }
       .map-share-feedback a { color: var(--primary-color); }

@@ -156,6 +156,47 @@ function stubMapHelpers() {
 // Let the card's async map build (await loadCardHelpers -> await createCardElement) settle.
 const flush = () => vi.runAllTimersAsync();
 
+describe("map card — live tracking", () => {
+  it("starts the selected duration and reflects backend tracking state without reloading", async () => {
+    stubMapHelpers();
+    const hass = makeHass();
+    hass.states[TRK].attributes.live_tracking_allowed = true;
+    const el = mount({ device: DEV }, hass);
+    expect(hass.callService).not.toHaveBeenCalled();
+    const duration = el.shadowRoot.querySelector("[data-live-duration]");
+    duration.value = "15";
+    duration.dispatchEvent(new Event("change"));
+    el.shadowRoot.querySelector("[data-live]").click();
+    await flush();
+    expect(hass.callService).toHaveBeenCalledWith("xplora_watch", "start_live_tracking", { entity_id: [TRK], duration_minutes: 15 });
+    hass.states[TRK] = {
+      ...hass.states[TRK], last_updated: FRESH_FIX,
+      attributes: { ...hass.states[TRK].attributes, live_tracking_active: true, live_tracking_until: "2026-06-27T10:15:00Z" },
+    };
+    el.hass = { ...hass };
+    expect(el.shadowRoot.querySelector("[data-live]").getAttribute("aria-pressed")).toBe("true");
+    el.shadowRoot.querySelector("[data-live]").click();
+    await flush();
+    expect(hass.callService).toHaveBeenLastCalledWith("xplora_watch", "stop_live_tracking", { entity_id: [TRK] });
+  });
+
+  it("shows an actionable error when starting is rejected", async () => {
+    stubMapHelpers();
+    const hass = makeHass({ callService: vi.fn(async () => { throw new Error("Watch not available"); }) });
+    hass.states[TRK].attributes.live_tracking_allowed = true;
+    const el = mount({ device: DEV }, hass);
+    el.shadowRoot.querySelector("[data-live]").click();
+    await flush();
+    expect(el.shadowRoot.querySelector('[role="alert"]').textContent).toContain("Watch not available");
+    expect(el.shadowRoot.querySelector("[data-live]").disabled).toBe(false);
+  });
+
+  it("hides live controls when the backend has not granted tracking", () => {
+    const el = mount({ device: DEV }, makeHass());
+    expect(el.shadowRoot.querySelector("[data-live]")).toBeNull();
+  });
+});
+
 describe("map card — location sharing", () => {
   function selectFormat(el, value) {
     const select = el.shadowRoot.querySelector("[data-share-format]");

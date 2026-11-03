@@ -10,7 +10,8 @@ messages, alarms, silent times and safe-zone status at a glance:
 
 ![Overview card](../images/overview_card.png)
 
-Tapping the location row opens a live map with the watch's last-known position and a refresh button:
+Tapping the location row opens a map with the watch's last-known position and a refresh button.
+Primary guardians can also start timed [live location tracking](live-tracking.md) from this map:
 
 ![Map location popup](../images/full_map_location.png)
 

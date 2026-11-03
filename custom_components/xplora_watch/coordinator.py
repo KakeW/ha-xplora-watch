@@ -72,6 +72,7 @@ from .const import (
 )
 from .demo import is_demo_account, make_controller
 from .geocoder import OpenCageGeocodeUA
+from .live import LiveTracking
 from .log import Log
 from .pyxplora_api.const import ALL_WATCH_FUNCTIONS, DEFAULT_TIMEOUT, MISSING_LOCATION_TM, WatchFunction
 from .pyxplora_api.exception_classes import AuthError, Error, LoginError, RateLimitError
@@ -212,6 +213,7 @@ class XploraDataUpdateCoordinator(DataUpdateCoordinator):
         # window. Manual refreshes intentionally do not use this gate.
         self._watch_refresh_tasks: dict[str, asyncio.Task[dict[str, Any]]] = {}
         self._watch_refreshed_at: dict[str, datetime] = {}
+        self.live = LiveTracking(self)
         # The fetch pipeline below still uses coordinator instance fields (`self.device`, battery,
         # location, etc.) as scratch state while it awaits network calls. Different request
         # signatures are intentionally not coalesced, but they must not execute that stateful
@@ -907,6 +909,48 @@ class XploraDataUpdateCoordinator(DataUpdateCoordinator):
             self.data.update(watch_entry)
         self.async_set_updated_data(self.data)
         return self.data
+
+    async def async_read_live_location(self, wuid: str) -> None:
+        """Read a tracking fix without issuing askWatchLocate or fetching other watch data."""
+        async with self._update_lock:
+            location = await self._with_recovery(lambda: self.controller.loadWatchLocation(wuid, with_ask=False))
+            fix = (location or {}).get("watch_last_location") or {}
+            try:
+                lat, lng = float(fix["lat"]), float(fix["lng"])
+                timestamp = self._fix_time_iso(fix.get("tm"))
+            except (KeyError, TypeError, ValueError):
+                return
+            if not (-90 <= lat <= 90 and -180 <= lng <= 180) or timestamp is None:
+                return
+            data = dict(self.data or {})
+            watch = dict(data.get(wuid) or {})
+            live_state = self.live.states.get(wuid, {})
+            started_at = live_state.get("live_tracking_started_at")
+            if started_at and datetime.fromisoformat(timestamp) >= datetime.fromisoformat(started_at):
+                live_state["live_tracking_received"] = True
+            # A concurrent manual refresh can already have a newer fix.
+            if watch.get("lastTrackTime") and timestamp < watch["lastTrackTime"]:
+                return
+            watch.update({
+                ATTR_TRACKER_LAT: lat, ATTR_TRACKER_LNG: lng,
+                "lastTrackTime": timestamp, "location_accuracy": fix.get("rad", -1),
+                "locateType": fix.get("locateType"), ATTR_TRACKER_POI: fix.get("poi"),
+            })
+            if timestamp != data.get(wuid, {}).get("lastTrackTime"):
+                watch[ATTR_LAST_UPDATE_STATUS] = LAST_UPDATE_OK
+                watch[ATTR_LAST_UPDATE_TIME] = datetime.now().isoformat()
+                if self._consumers_any_enabled(_HISTORY_CONSUMERS):
+                    points = self._parse_loc_history({"locHistory": {"list": [fix]}})
+                    tzinfo = self._history_tzinfo()
+                    day = datetime.fromisoformat(timestamp).astimezone(tzinfo).strftime("%Y-%m-%d")
+                    await self._store_day(wuid, day, points, tzinfo)
+                    bounded, total = self._bounded_history(wuid)
+                    watch[ATTR_LOCATION_HISTORY] = {"points": bounded, "total": total}
+            # Keep an old reverse-geocoded street address from describing a new pin.
+            if (lat, lng) != (data.get(wuid, {}).get(ATTR_TRACKER_LAT), data.get(wuid, {}).get(ATTR_TRACKER_LNG)):
+                watch[ATTR_LOCATION_NAME] = None
+            data[wuid] = watch
+            self.async_set_updated_data(data)
 
     async def async_refresh_functions(self, targets: list[str] | None = None) -> dict[str, Any]:
         """On-demand refresh of the alarm/silent/safezone data.
