@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import binascii
 import json
 import logging
 from typing import Any
 from uuid import uuid4
 
-from firebase_messaging import FcmPushClient, FcmRegisterConfig
 from cryptography.exceptions import InvalidTag
+from firebase_messaging import FcmPushClient, FcmRegisterConfig
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import aiohttp_client
 from homeassistant.helpers.storage import Store
@@ -34,18 +35,47 @@ class XploraFcmPushClient(FcmPushClient):
 
     @staticmethod
     def _decrypt_raw_data(credentials, crypto_key_str, salt_str, raw_data):
-        return FcmPushClient._decrypt_raw_data(
-            credentials,
-            crypto_key_str + "=" * (-len(crypto_key_str) % 4),
-            salt_str + "=" * (-len(salt_str) % 4),
-            raw_data,
-        )
+        stage = "peer_key_base64"
+        key_bytes = salt_bytes = None
+        key = crypto_key_str + "=" * (-len(crypto_key_str) % 4)
+        salt = salt_str + "=" * (-len(salt_str) % 4)
+        try:
+            key_bytes = len(base64.urlsafe_b64decode(key))
+            stage = "salt_base64"
+            salt_bytes = len(base64.urlsafe_b64decode(salt))
+            stage = "decrypt"
+            return FcmPushClient._decrypt_raw_data(credentials, key, salt, raw_data)
+        except (ValueError, InvalidTag, KeyError, TypeError) as err:
+            # Retain structural information only: never exception text, keys or payload.
+            raise _PushDecodeError(
+                stage,
+                type(err).__name__,
+                len(crypto_key_str),
+                len(salt_str),
+                key_bytes,
+                salt_bytes,
+                len(raw_data),
+            ) from None
 
     def _handle_data_message(self, msg):
         try:
             return super()._handle_data_message(msg)
-        except (ValueError, binascii.Error, InvalidTag):
-            _LOGGER.warning("Xplora push message could not be decrypted; receiver remains active")
+        except _PushDecodeError as err:
+            _LOGGER.warning(
+                "Xplora push decode failed: stage=%s error=%s key_chars=%s salt_chars=%s "
+                "key_bytes=%s salt_bytes=%s body_bytes=%s; receiver remains active",
+                *err.details,
+            )
+        except (ValueError, binascii.Error, InvalidTag, KeyError, TypeError) as err:
+            _LOGGER.warning("Xplora push handling failed: stage=envelope error=%s; receiver remains active", type(err).__name__)
+
+
+class _PushDecodeError(ValueError):
+    """Safe diagnostic envelope; deliberately excludes upstream exception messages."""
+
+    def __init__(self, *details):
+        self.details = details
+        super().__init__("Xplora push decode failed")
 
 
 def parse_message(payload: Any) -> dict[str, str] | None:
@@ -90,7 +120,7 @@ def parse_activity(payload: Any, persistent_id: Any = None) -> dict[str, str] | 
             "event_id": str(event_id or ""),
             "sender_id": str(content.get("sender") or content.get("uid") or ""),
         }
-    except (ValueError, TypeError, KeyError, AttributeError):
+    except ValueError, TypeError, KeyError, AttributeError:
         return None
 
 
@@ -213,9 +243,7 @@ class XploraPush:
         for wuid in targets:
             self.refresh_pending.add(wuid)
             if wuid not in self.refresh_tasks:
-                self.refresh_tasks[wuid] = self.hass.async_create_background_task(
-                    self.refresh_messages(wuid), f"Xplora activity {wuid}"
-                )
+                self.refresh_tasks[wuid] = self.hass.async_create_background_task(self.refresh_messages(wuid), f"Xplora activity {wuid}")
 
     async def refresh_messages(self, wuid: str) -> None:
         """Warm the thread and media cache; coalesce bursts per watch."""
