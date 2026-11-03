@@ -209,7 +209,7 @@ async def test_connect_reuses_credentials_and_checks_ack(hass, coordinator):
     client.credentials = saved
     client.checkin_or_register = AsyncMock(return_value="fcm-token")
     client.start = AsyncMock()
-    with patch("custom_components.xplora_watch.push.FcmPushClient", return_value=client) as factory:
+    with patch("custom_components.xplora_watch.push.XploraFcmPushClient", return_value=client) as factory:
         await receiver.connect()
     assert factory.call_args.args[2] == saved
     client.start.assert_awaited_once()

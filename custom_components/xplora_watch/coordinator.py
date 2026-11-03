@@ -1001,6 +1001,16 @@ class XploraDataUpdateCoordinator(DataUpdateCoordinator):
             # Battery/charging/location/unread-count come from the `deviceList` call
             # `setDevices()` already made (see ISSUE-12), overlaid with the fresh fix above.
             self.unread_msg = self.device.get("unreadChatMessageCount", -1)
+            # The chat feed can lead deviceList after a push. Keep its confirmed unread
+            # messages as a lower bound, including during the following lean status refresh.
+            cached_unread = sum(
+                1 for item in chats.get("list") or []
+                if item.get("readFlag") == CHAT_READ_FLAG_UNREAD
+                and not item.get(ATTR_CHAT_READ_RECEIPT_SENT)
+                and (item.get("sender") or {}).get("id")
+                and str((item.get("sender") or {}).get("id")) != str(self.user_id)
+            )
+            self.unread_msg = max(self.unread_msg, cached_unread) if cached_unread else self.unread_msg
             self.battery = self.device.get("watch_battery", -1)
             self.is_charging = self.device.get("watch_charging", False)
             self.get_location()
@@ -1552,10 +1562,11 @@ class XploraDataUpdateCoordinator(DataUpdateCoordinator):
         changed = prior != merged
         days[day_key] = merged
         # Drop buckets older than retention (lexicographic compare works on YYYY-MM-DD).
-        cutoff = (datetime.now(tzinfo) - timedelta(days=self._resolved.history_retention_days)).strftime("%Y-%m-%d")
-        for stale_key in [k for k in days if k < cutoff]:
-            del days[stale_key]
-            changed = True
+        if self._resolved.history_retention_days != 0:
+            cutoff = (datetime.now(tzinfo) - timedelta(days=self._resolved.history_retention_days)).strftime("%Y-%m-%d")
+            for stale_key in [k for k in days if k < cutoff]:
+                del days[stale_key]
+                changed = True
         if changed:
             await self._persist_loc_history()
         # A directly requested day can already be outside retention. Return the fetched/merged

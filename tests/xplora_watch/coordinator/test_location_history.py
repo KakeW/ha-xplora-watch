@@ -223,6 +223,16 @@ def test_parse_loc_history_drops_malformed_entries() -> None:
 # ---- prune / bounded slice ----------------------------------------------------------------------
 
 
+async def test_unlimited_retention_keeps_old_buckets(coordinator: XploraDataUpdateCoordinator) -> None:
+    coordinator._resolved = dataclasses.replace(coordinator._resolved, history_retention_days=0)
+    tzinfo = coordinator._history_tzinfo()
+    days = coordinator._loc_history.setdefault(DEFAULT_WUID, {})
+    old = "2000-01-01"
+    days[old] = [{"tm": 1, "lat": 1.0, "lng": 2.0}]
+    await coordinator._store_day(DEFAULT_WUID, _today(coordinator), [], tzinfo)
+    assert old in coordinator._loc_history[DEFAULT_WUID]
+
+
 async def test_store_day_prunes_buckets_beyond_retention(coordinator: XploraDataUpdateCoordinator) -> None:
     """Day buckets older than `history_retention_days` are dropped on store."""
     coordinator._resolved = dataclasses.replace(coordinator._resolved, history_retention_days=2)

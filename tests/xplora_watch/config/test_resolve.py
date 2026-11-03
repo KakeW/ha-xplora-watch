@@ -94,7 +94,9 @@ def test_resolve_history_retention_clamps_and_defaults() -> None:
 
     assert resolve({}).history_retention_days == DEFAULT_HISTORY_RETENTION_DAYS
     assert resolve({"history_retention_days": 14}).history_retention_days == 14
-    assert resolve({"history_retention_days": 0}).history_retention_days == HISTORY_RETENTION_DAYS_MIN
+    assert resolve({"history_retention_days": 0}).history_retention_days == 0
+    assert resolve({"history_retention_days": "unlimited"}).history_retention_days == 0
+    assert resolve({"history_retention_days": -1}).history_retention_days == HISTORY_RETENTION_DAYS_MIN
     assert resolve({"history_retention_days": 99999}).history_retention_days == HISTORY_RETENTION_DAYS_MAX
     assert resolve({"history_retention_days": "nope"}).history_retention_days == DEFAULT_HISTORY_RETENTION_DAYS
 

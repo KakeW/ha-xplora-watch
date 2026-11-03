@@ -118,7 +118,7 @@
           "push_notifications": "Receive push messages"
         },
         "data_description": {
-          "history_retention_days": "How long the optional location-history sensor keeps past positions. Home Assistant retains far more than the Xplora® app's ~3-day window. Only matters once you enable the location-history sensor.",
+          "history_retention_days": "How long the optional location-history sensor keeps saved positions. Choose Unlimited to retain all saved days without age-based deletion. Applies once the location-history sensor is enabled.",
           "scan_interval": "How often Home Assistant polls the watches for battery, location and status. Off (the default) disables automatic polling — updates then come only from the xplora_watch.see service or pressing the Update button.",
           "scan_interval_functions": "How often the rarely-changing alarms, silent times and safe-zone definitions are fetched. Each needs a separate request per watch, so this is Off by default to minimise traffic. Choose 'With every poll' to refresh them on each update, or fetch them on demand with the xplora_watch.refresh_functions service or by tapping the count tiles on the card.",
           "auto_fetch_history": "When on, the integration re-fetches the previous day's location track at 01:00 local time and merges it into the saved track. This captures positions Xplora makes available only after the day has ended.",

@@ -69,10 +69,19 @@ async def test_submit_happy_path_creates_options_entry(
 async def test_submit_history_retention_is_stored(hass, mock_config_entry_phone: MockConfigEntry, mock_graphql, mock_home_zone) -> None:
     """An in-range retention value is normalized (kept) and stored as a canonical int."""
     result = await hass.config_entries.options.async_init(mock_config_entry_phone.entry_id)
-    result = await hass.config_entries.options.async_configure(result["flow_id"], _base_submit_input(**{CONF_HISTORY_RETENTION_DAYS: 14}))
+    result = await hass.config_entries.options.async_configure(result["flow_id"], _base_submit_input(**{CONF_HISTORY_RETENTION_DAYS: "14"}))
     assert result["type"] == FlowResultType.CREATE_ENTRY
     assert result["data"][CONF_HISTORY_RETENTION_DAYS] == 14
     assert result["data"][CONF_HISTORY_RETENTION_DAYS] <= HISTORY_RETENTION_DAYS_MAX
+
+
+async def test_submit_unlimited_history_retention(hass, mock_config_entry_phone, mock_graphql, mock_home_zone) -> None:
+    result = await hass.config_entries.options.async_init(mock_config_entry_phone.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], _base_submit_input(**{CONF_HISTORY_RETENTION_DAYS: "0"})
+    )
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert result["data"][CONF_HISTORY_RETENTION_DAYS] == 0
 
 
 async def test_submit_empty_watches_shows_no_watch_error(

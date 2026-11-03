@@ -261,12 +261,9 @@ HISTORY_RETENTION_DAYS_MAX: Final = 90
 
 
 def normalize_history_retention_days(raw: int | str | None) -> int:
-    """Clamp a stored/legacy history-retention value into the supported day range.
-
-    Falls back to the default for unparseable values and clamps anything outside
-    ``[HISTORY_RETENTION_DAYS_MIN, HISTORY_RETENTION_DAYS_MAX]`` so resolution never raises and
-    a fat-fingered value can neither disable retention nor balloon the Store unbounded.
-    """
+    """Normalize retention days; zero (or 'unlimited') disables age-based pruning."""
+    if raw in (0, "0", "unlimited"):
+        return 0
     try:
         value = int(raw)  # type: ignore[arg-type]
     except TypeError, ValueError:

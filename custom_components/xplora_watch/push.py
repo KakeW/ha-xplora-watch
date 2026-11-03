@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import binascii
 import json
 import logging
 from typing import Any
 from uuid import uuid4
 
 from firebase_messaging import FcmPushClient, FcmRegisterConfig
+from cryptography.exceptions import InvalidTag
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import aiohttp_client
 from homeassistant.helpers.storage import Store
@@ -25,6 +27,25 @@ EVENT_ACTIVITY = "xplora_watch_activity"
 # Message types present in the official iOS bundle; only text has a live fixture so far.
 CHAT_TYPES = {"chat_text", "chat_voice", "chat_emoticon", "chat_image", "chat_video"}
 _LOGGER = logging.getLogger(__name__)
+
+
+class XploraFcmPushClient(FcmPushClient):
+    """Accept unpadded base64url headers and isolate malformed encrypted messages."""
+
+    @staticmethod
+    def _decrypt_raw_data(credentials, crypto_key_str, salt_str, raw_data):
+        return FcmPushClient._decrypt_raw_data(
+            credentials,
+            crypto_key_str + "=" * (-len(crypto_key_str) % 4),
+            salt_str + "=" * (-len(salt_str) % 4),
+            raw_data,
+        )
+
+    def _handle_data_message(self, msg):
+        try:
+            return super()._handle_data_message(msg)
+        except (ValueError, binascii.Error, InvalidTag):
+            _LOGGER.warning("Xplora push message could not be decrypted; receiver remains active")
 
 
 def parse_message(payload: Any) -> dict[str, str] | None:
@@ -253,7 +274,7 @@ class XploraPush:
             await self.disconnect()
 
     async def connect(self) -> None:
-        self.client = FcmPushClient(
+        self.client = XploraFcmPushClient(
             self.received,
             FcmRegisterConfig(
                 FIREBASE_CONFIG["project_id"],

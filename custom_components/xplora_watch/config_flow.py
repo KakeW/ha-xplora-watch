@@ -434,13 +434,13 @@ class XploraOptionsFlowHandler(OptionsFlowWithConfigEntry):
                 # than the app's ~3-day window.
                 vol.Required(
                     CONF_HISTORY_RETENTION_DAYS,
-                    default=_options.get(CONF_HISTORY_RETENTION_DAYS, DEFAULT_HISTORY_RETENTION_DAYS),
-                ): NumberSelector(
-                    NumberSelectorConfig(
-                        min=HISTORY_RETENTION_DAYS_MIN,
-                        max=HISTORY_RETENTION_DAYS_MAX,
-                        mode=NumberSelectorMode.SLIDER,
-                    ),
+                    default=str(normalize_history_retention_days(_options.get(CONF_HISTORY_RETENTION_DAYS, DEFAULT_HISTORY_RETENTION_DAYS))),
+                ): SelectSelector(
+                    SelectSelectorConfig(
+                        options=[SelectOptionDict(value="0", label="Unlimited")]
+                        + [SelectOptionDict(value=str(day), label=str(day)) for day in range(HISTORY_RETENTION_DAYS_MIN, HISTORY_RETENTION_DAYS_MAX + 1)],
+                        mode=SelectSelectorMode.DROPDOWN,
+                    )
                 ),
             }
         )
