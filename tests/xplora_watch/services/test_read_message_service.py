@@ -34,6 +34,24 @@ async def test_prefetch_updates_unread_before_poll_and_preserves_receipts(hass, 
         assert coordinator.data[DEFAULT_WUID][SENSOR_MESSAGE]["list"][0]["haReadReceiptSent"] is True
 
 
+async def test_chat_verification_skips_activity_and_later_refresh_preserves_messages(hass, coordinator):
+    coordinator.data = {DEFAULT_WUID: {SENSOR_MESSAGE: {"activity_list": [{"id": "old"}]}}}
+    raw = {"list": [_make_raw_chat("123", "TEXT")]}
+    with (
+        patch.object(coordinator.controller, "getWatchChatsRaw", new_callable=AsyncMock, return_value=raw) as chats,
+        patch.object(coordinator.controller, "getWatchCallLog", new_callable=AsyncMock, return_value={"list": [{"id": "new"}]}) as activities,
+    ):
+        await coordinator.message_data(DEFAULT_WUID, 10, False, include_activity=False)
+        activities.assert_not_awaited()
+        assert coordinator.data[DEFAULT_WUID][SENSOR_MESSAGE]["activity_list"] == [{"id": "old"}]
+        assert coordinator.data[DEFAULT_WUID]["unreadMsg"] == 1
+        await coordinator.async_refresh_activity(DEFAULT_WUID)
+        chats.assert_awaited_once()
+        assert coordinator.data[DEFAULT_WUID][SENSOR_MESSAGE]["activity_list"] == [{"id": "new"}]
+        assert coordinator.data[DEFAULT_WUID][SENSOR_MESSAGE]["list"][0]["msgId"] == "123"
+        assert coordinator.data[DEFAULT_WUID]["unreadMsg"] == 1
+
+
 async def test_push_prefetch_publishes_thread_before_media_and_does_not_mark_read(hass, coordinator):
     service = XploraMessageSensorUpdateService(hass, "test")
     order = []

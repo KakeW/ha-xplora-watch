@@ -7,11 +7,12 @@ from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 import pytest
 
 from custom_components.xplora_watch.push import EVENT_ACTIVITY, EVENT_MESSAGE, XploraPush, parse_activity, parse_message
+from tests.xplora_watch.conftest import setup_service_target
 
 
 @pytest.fixture(autouse=True)
 def prefetch(coordinator):
-    async def metadata(wuid, *_args):
+    async def metadata(wuid, *_args, **_kwargs):
         return (
             {"list": [{"msgId": "123", "id": "chat123", "sender": {"id": "watch-test"}, "type": "TEXT", "data": {"text": "Hello"}}]}
             if wuid == "watch-test"
@@ -68,7 +69,7 @@ async def test_unknown_push_id_still_notifies_and_prefetches_configured_watches(
     await hass.async_block_till_done()
     assert len(events) == 1
     assert events[0]["sender_id"] == "push-id-not-a-watch-uid"
-    assert {call.args[1] for call in prefetch.await_args_list} == {"watch-test", "other"}
+    assert {call.args[1] for call in prefetch.await_args_list} == {"watch-test"}
     await receiver.stop()
 
 
@@ -129,6 +130,20 @@ async def test_emoji_type_and_text_come_from_thread_before_notification(hass, co
     assert events[0]["message_type"] == "chat_emoticon"
     assert events[0]["text"] == "😘"
     coordinator.message_data.assert_awaited()
+    await receiver.stop()
+
+
+async def test_matched_first_watch_notifies_without_querying_other_watch(hass, coordinator, prefetch):
+    devices = await setup_service_target(hass, coordinator, wuids=("watch-test", "other"))
+    receiver = XploraPush(hass, coordinator, "test")
+    events = []
+    hass.bus.async_listen(EVENT_MESSAGE, lambda event: events.append(event.data))
+    await receiver.consume(parse_message(payload(sender="unknown-push-identifier")))
+    await hass.async_block_till_done()
+    assert len(events) == 1
+    assert events[0]["device_id"] == devices["watch-test"]
+    assert coordinator.message_data.await_count == 1
+    assert coordinator.message_data.await_args.kwargs["include_activity"] is False
     await receiver.stop()
 
 

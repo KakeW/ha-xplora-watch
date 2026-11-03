@@ -1737,11 +1737,11 @@ class XploraDataUpdateCoordinator(DataUpdateCoordinator):
             }
         }
 
-    async def message_data(self, wuid: str, message_limit: int, remove_message: bool) -> dict[str, Any]:
+    async def message_data(self, wuid: str, message_limit: int, remove_message: bool, *, include_activity: bool = True) -> dict[str, Any]:
         """Fetch chats and call history from Xplora into the local message cache."""
         self._log.debug("Fetch message data from Xplora: %s", wuid[25:])
         res_chats = await self.controller.getWatchChatsRaw(wuid, limit=message_limit, show_del_msg=remove_message, mark_as_read=False)
-        call_log_result = await self.controller.getWatchCallLog(wuid)
+        call_log_result = await self.controller.getWatchCallLog(wuid) if include_activity else None
         if isinstance(res_chats, ChatsNew):
             res_chats = res_chats.to_dict()
         chats = ChatsNew.from_dict(res_chats).to_dict()
@@ -1771,7 +1771,7 @@ class XploraDataUpdateCoordinator(DataUpdateCoordinator):
             if unread:
                 previous = watch_data.get("unreadMsg")
                 watch_data["unreadMsg"] = max(previous if isinstance(previous, int) else 0, unread)
-            if not call_log_result.get("_error"):
+            if call_log_result is not None and not call_log_result.get("_error"):
                 chats["activity_list"] = call_log_result.get("list") or []
                 chats["call_log_list"] = chats["activity_list"]  # Backwards compatibility for existing cards.
                 chats.pop("activity_error", None)
@@ -1782,12 +1782,31 @@ class XploraDataUpdateCoordinator(DataUpdateCoordinator):
                 activities = old_cache.get("activity_list", old_cache.get("call_log_list", []))
                 chats["activity_list"] = activities
                 chats["call_log_list"] = activities
-                chats["activity_error"] = call_log_result["_error"]
-                chats["call_log_error"] = call_log_result["_error"]
+                error = call_log_result.get("_error") if call_log_result is not None else old_cache.get("activity_error")
+                if error:
+                    chats["activity_error"] = error
+                    chats["call_log_error"] = error
             watch_data[SENSOR_MESSAGE] = chats
             watch_entry[wuid] = watch_data
             self.data = watch_entry
         return res_chats
+
+    async def async_refresh_activity(self, wuid: str) -> None:
+        """Refresh the activity cache separately from time-sensitive chat verification."""
+        result = await self._with_recovery(lambda: self.controller.getWatchCallLog(wuid))
+        async with self._update_lock:
+            data = dict(self.data or {})
+            watch = dict(data.get(wuid) or {})
+            chats = dict(watch.get(SENSOR_MESSAGE) or {})
+            if result.get("_error"):
+                chats["activity_error"] = chats["call_log_error"] = result["_error"]
+            else:
+                chats["activity_list"] = chats["call_log_list"] = result.get("list") or []
+                chats.pop("activity_error", None)
+                chats.pop("call_log_error", None)
+            watch[SENSOR_MESSAGE] = chats
+            data[wuid] = watch
+            self.async_set_updated_data(data)
 
     async def async_mark_chat_message_read(self, wuid: str, msg_id: str, chat_id: str) -> bool:
         """Write one read receipt and atomically mirror it into coordinator state."""

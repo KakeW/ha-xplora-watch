@@ -1,0 +1,64 @@
+blueprint:
+  name: Xplora – viesti-ilmoitus ja pikavastaus (iOS)
+  description: >-
+    Lähettää valittujen kellojen uudet viestit puhelimeen. Ilmoituksen Vastaa-toiminto
+    avaa tekstikentän ja lähettää vastauksen oikealle kellolle taustalla.
+    Poista aiempi Xplora-viesti-ilmoitusautomaatio käytöstä välttääksesi tuplailmoitukset.
+  domain: automation
+  input:
+    watches:
+      name: Kellot
+      selector:
+        device:
+          integration: xplora_watch
+          multiple: true
+    phone:
+      name: Puhelin (Home Assistant Companion)
+      selector:
+        device:
+          integration: mobile_app
+triggers:
+  - trigger: event
+    event_type: xplora_watch_message
+    id: incoming
+  - trigger: event
+    event_type: mobile_app_notification_action
+    id: reply
+variables:
+  watches: !input watches
+  phone: !input phone
+actions:
+  - choose:
+      - conditions: >-
+          {{ trigger.id == 'incoming' and trigger.event.data.get('device_id') in watches }}
+        sequence:
+          - device_id: !input phone
+            domain: mobile_app
+            type: notify
+            title: "{{ trigger.event.data.get('sender_name') or 'Xplora' }}"
+            message: >-
+              {{ trigger.event.data.get('text') or
+                 ('Uusi ääniviesti' if trigger.event.data.get('message_type') == 'chat_voice'
+                  else 'Uusi viesti kellosta') }}
+            data:
+              tag: "xplora_{{ trigger.event.data.device_id }}_{{ trigger.event.data.message_id }}"
+              actions:
+                - action: "XPLORA_REPLY_{{ phone }}:{{ trigger.event.data.device_id }}"
+                  title: Vastaa
+                  behavior: textInput
+                  activationMode: background
+                  textInputButtonTitle: Lähetä
+                  textInputPlaceholder: Kirjoita vastaus…
+      - conditions: >-
+          {{ trigger.id == 'reply'
+             and trigger.event.data.get('action', '').startswith('XPLORA_REPLY_' ~ phone ~ ':')
+             and trigger.event.data.get('action', '').split(':')[-1] in watches
+             and trigger.event.data.get('reply_text') is string
+             and trigger.event.data.reply_text | trim != '' }}
+        sequence:
+          - action: xplora_watch.send_message
+            data:
+              device_id: "{{ trigger.event.data.action.split(':')[-1] }}"
+              message: "{{ trigger.event.data.reply_text }}"
+mode: parallel
+max: 50

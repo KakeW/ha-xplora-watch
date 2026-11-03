@@ -14,6 +14,7 @@ from cryptography.exceptions import InvalidTag
 from firebase_messaging import FcmPushClient, FcmRegisterConfig
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import aiohttp_client
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.storage import Store
 
 from .config import resolve
@@ -200,7 +201,7 @@ class XploraPush:
             try:
                 chats = await asyncio.wait_for(
                     self.coordinator._with_recovery(
-                        lambda w=wuid: self.coordinator.message_data(w, options.message, options.remove_message)
+                        lambda w=wuid: self.coordinator.message_data(w, options.message, options.remove_message, include_activity=False)
                     ),
                     30,
                 )
@@ -214,6 +215,8 @@ class XploraPush:
             self.refresh_pending.add(wuid)
             if wuid not in self.refresh_tasks:
                 self.refresh_tasks[wuid] = self.hass.async_create_background_task(self.refresh_messages(wuid), f"Xplora messages {wuid}")
+            if matched:
+                break
         if matched:
             wuid, chat = matched
             actual_sender = chat.get("sender") or {}
@@ -233,6 +236,11 @@ class XploraPush:
                 }.get(chat.get("type"), "chat_unknown"),
                 "text": str(data.get("text") or data.get("emoticon_id") or ""),
             }
+            device = dr.async_get(self.hass).async_get_device(
+                identifiers={(DOMAIN, f"{self.coordinator._entry.unique_id}_{wuid}")}
+            )
+            if device is not None:
+                message["device_id"] = device.id
         else:
             # Unverified push labels can misdescribe emoji as voice. Deliver a
             # generic alert rather than claiming a type we could not verify.
@@ -279,6 +287,7 @@ class XploraPush:
                         # Reuse that result and refresh only status/location, avoiding a duplicate
                         # chat/feed request for the same push.
                         await service.async_prefetch_watch(self.coordinator, wuid, chats=chats)
+                        await self.coordinator.async_refresh_activity(wuid)
                         await self.coordinator.async_refresh_watch_cache(wuid, include_chats=False, force=True)
                 except Exception as err:  # noqa: BLE001 -- optional cache fetch must not stop push delivery
                     _LOGGER.warning("Xplora message prefetch failed (%s)", type(err).__name__)
